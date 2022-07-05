@@ -14,6 +14,8 @@ BEGIN {
 	# prefix=...
 	g_key_prefix = "global|prefix"
 	g_key_function = "global|function"
+	g_key_format_cim = "global|format_cim"
+	g_key_format_db = "global|format_db"
 	g_key_separator_propertyname = "global|separator_property_name"
 	g_key_separator_namevalue = "global|separator_name_value"
 	# Diagnostic levels level2string
@@ -58,8 +60,8 @@ FNR == NR {
 			len = split(tmpLine, iniLine, "=")
 			if (iniLine[1] ~ /^[[:blank:]]*\[/) {
 				section = removeBlankStartAndEnd(iniLine[1])
-				gsub("\\[", "", section)
-				gsub("\\]", "", section)
+				gsub("^.*\\[", "", section)
+				gsub("\\].*$", "", section)
 			} else {
 				key = removeBlankAll(iniLine[1])
 				val = iniLine[2]
@@ -100,6 +102,12 @@ FNR == 3 {
 # 
 FNR == 5 {
 	diagMsg(DEBUG_LEVEL["INFO"], sprintf("Function raw = \"%s\"", $0))
+	# print the last entry from previous file
+	if (g_config[g_key_function] ~ g_config[g_key_format_cim]) {
+		diagArray(g_object, "g_object")
+		diagMsg(DEBUG_LEVEL["INFO"], "=============================================================")
+		split("", g_object, FS)
+	}
 	g_config[g_key_function] = removeBlankStartAndEnd($0)
 	diagMsg(DEBUG_LEVEL["INFO"], sprintf("Function = \"%s\"", g_config[g_key_function]))
 	next
@@ -120,14 +128,14 @@ FNR == 5 {
 # Features , String[] sep=| , MESSAGESERVER|ENQUE 
 # SapVersionInfo , String , 123, patch 456, changelist 7890123
 # 
-/^\*/ && (g_config[g_key_function] ~ /GetComputerSystem/ || g_config[g_key_function] ~ /ListSAP/) {
-	dumpArray(g_object, "g_object")
-	printf "=============================================================\n"
+/^\*/ && g_config[g_key_function] ~ g_config[g_key_format_cim] {
+	diagArray(g_object, "g_object")
+	diagMsg(DEBUG_LEVEL["INFO"], "=============================================================")
 	split("", g_object, FS)
 	next
 }
 
-g_config[g_key_function] ~ /GetComputerSystem/ || g_config[g_key_function] ~ /ListSAP/ {
+g_config[g_key_function] ~ g_config[g_key_format_cim] {
 	# check for separator
 	l_propsep = parameterSeparator($0)
 	# special case when the separator is a comman
@@ -147,7 +155,13 @@ g_config[g_key_function] ~ /GetComputerSystem/ || g_config[g_key_function] ~ /Li
 }
 
 END {
-	# dumpArray(g_config,"g_config")
+	# flush objects 
+	if (g_config[g_key_function] ~ g_config[g_key_format_cim]) {
+		diagArray(g_object, "g_object")
+		diagMsg(DEBUG_LEVEL["INFO"], "=============================================================")
+		split("", g_object, FS)
+	}
+	# diagArray(g_config,"g_config")
 }
 
 
@@ -164,6 +178,25 @@ function alen(a, i, k)
 }
 
 ##
+# @brief Print array content to INFO
+#
+# It is possible to specify a pattern for the array
+# key to filter output. If nothing specified the
+# whole array content will be printed.
+#
+function diagArray(tmpArray, tmpName, tmpFilter, k)
+{
+	if (length(tmpFilter) == 0) {
+		tmpFilter = ".*"
+	}
+	for (k in tmpArray) {
+		if (k ~ tmpFilter) {
+			diagMsg(DEBUG_LEVEL["INFO"], sprintf("%s[\"%s\"] = %s", tmpName, k, tmpArray[k]))
+		}
+	}
+}
+
+##
 # @brief Print DIAGnostic MeSaGge
 #
 function diagMsg(tmpLevel, tmpMessage)
@@ -176,25 +209,6 @@ function diagMsg(tmpLevel, tmpMessage)
 	}
 	if (tmpLevel <= ARCHI_DEBUG) {
 		printf "ARCHI %s: %s\n", DEBUG_LEVEL[tmpLevel], tmpMessage
-	}
-}
-
-##
-# @brief Print array content to INFO
-#
-# It is possible to specify a pattern for the array
-# key to filter output. If nothing specified the
-# whole array content will be printed.
-#
-function dumpArray(tmpArray, tmpName, tmpFilter, k)
-{
-	if (length(tmpFilter) == 0) {
-		tmpFilter = ".*"
-	}
-	for (k in tmpArray) {
-		if (k ~ tmpFilter) {
-			diagMsg(DEBUG_LEVEL["INFO"], sprintf("%s[\"%s\"] = %s", tmpName, k, tmpArray[k]))
-		}
 	}
 }
 
