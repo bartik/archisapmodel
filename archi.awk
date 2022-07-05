@@ -243,7 +243,8 @@ function parameterSeparator(tmpLine, i, s)
 #			tmpLine - values to split = version=123;patch=456;changelist=7890123
 #			s - separator = ;
 #			the rest are local variables. The name/value separator is fixed in the
-#			ini file otherwise ther woud need to be several separator defined by sep=
+#			ini file otherwise there would need to be several separators defined by
+#			sep=
 # Result:
 #			Is written into the g_object array
 #			g_object["Feature_1"] = MESSAGESERVER
