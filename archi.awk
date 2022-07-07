@@ -6,6 +6,10 @@
 # _relation.csv
 # "ID","Type","Name","Documentation","Source","Target","Specialization"
 BEGIN {
+	# global object counters
+	g_counter_cpu = 0
+	g_counter_networkport = 0
+	g_counter_eid = -1
 	# field separator
 	FS = ","
 	# config array key for the ID string template
@@ -23,6 +27,7 @@ BEGIN {
 	g_key_attribute_name = "attribute|name"
 	g_key_attribute_type = "attribute|type"
 	g_key_attribute_SID = "attribute|sid"
+	g_key_attribute_DeviceID = "attribute|deviceid"
 	g_key_attribute_instance_type = "attribute|instance_type"
 	g_key_specialization_default = "specialization|default"
 	# Diagnostic levels level2string
@@ -138,7 +143,11 @@ FNR == 5 {
 /^\*/ && g_config[g_key_function] ~ g_config[g_key_format_cim] {
 	diagArray(g_object, "g_object")
 	diagMsg(DEBUG_LEVEL["INFO"], "=============================================================")
-	printObject(g_object)
+	if (g_counter_eid > -1) {
+		printObject(g_object, objectID())
+	} else {
+		g_counter_eid++
+	}
 	diagMsg(DEBUG_LEVEL["INFO"], "=============================================================")
 	split("", g_object, FS)
 	next
@@ -168,7 +177,7 @@ END {
 	if (g_config[g_key_function] ~ g_config[g_key_format_cim]) {
 		diagArray(g_object, "g_object")
 		diagMsg(DEBUG_LEVEL["INFO"], "=============================================================")
-		printObject(g_object)
+		printObject(g_object, objectID())
 		diagMsg(DEBUG_LEVEL["INFO"], "=============================================================")
 		split("", g_object, FS)
 	}
@@ -224,6 +233,19 @@ function diagMsg(tmpLevel, tmpMessage)
 }
 
 ##
+# @brief return object id
+#
+# This function will construct a id for
+# the archimate object.
+#
+function objectID(e)
+{
+	e = sprintf(g_config[g_key_prefix], g_counter_eid++)
+	diagMsg(DEBUG_LEVEL["INFO"], sprintf("eID=%s", e))
+	return e
+}
+
+##
 # @brief return object name
 #
 # This function will construct a name for
@@ -238,6 +260,18 @@ function objectName(tmpObject, s, n)
 		n = "Unknown"
 		if (s ~ /SAPInstance/) {
 			n = sprintf("SAP %s %s", tmpObject[g_config[g_key_attribute_SID]], tmpObject[g_config[g_key_attribute_instance_type]])
+		} else if (s ~ /SAP_ITSAMProcessor/) {
+			if (length(tmpObject[g_config[g_key_attribute_DeviceID]]) > 0) {
+				n = sprintf("CPU %d", tmpObject[g_config[g_key_attribute_DeviceID]])
+			} else {
+				n = sprintf("CPU %d", g_counter_cpu++)
+			}
+		} else if (s ~ /SAP_ITSAMNetworkPort/) {
+			if (length(tmpObject[g_config[g_key_attribute_DeviceID]]) > 0) {
+				n = sprintf("%s", tmpObject[g_config[g_key_attribute_DeviceID]])
+			} else {
+				n = sprintf("Network port %d", g_counter_networkport++)
+			}
 		}
 	} else {
 		n = replaceBlankAll(n, g_config[g_key_separator_namewords])
@@ -337,10 +371,13 @@ function parameterSplit(tmpAttribute, tmpLine, s, i, j, c, p, v, t)
 #
 function printELEMENT(eID, eType, eName, eDocumentation, eSpecialization)
 {
+	eName = sanitize(eName)
+	eDocumentation = sanitize(eDocumentation)
+	eSpecialization = sanitize(eDocumentation)
 	printf "ARCHI ELEMENTS: \"%s\",\"%s\",\"%s\",\"%s\",\"%s\"\n", eID, eType, eName, eDocumentation, eSpecialization
 }
 
-function printObject(tmpObject, t, n, d, s)
+function printObject(tmpObject, e, t, n, d, s, k)
 {
 	# get the archimate element to which the "CreationClassName" maps (see ini file)
 	t = objectType(tmpObject)
@@ -354,7 +391,11 @@ function printObject(tmpObject, t, n, d, s)
 	# specialization
 	s = tmpObject[g_config[g_key_attribute_type]]
 	# print element
-	printELEMENT("id-abcd", t, n, d, s)
+	printELEMENT(e, t, n, d, s)
+	# print properties
+	for (k in tmpObject) {
+		printPROPERTY(e, k, tmpObject[k])
+	}
 }
 
 ##
@@ -425,6 +466,16 @@ function replaceBlankAll(tmpLine, r)
 		gsub("/" r "+/", r, tmpLine)
 	}
 	return tmpLine
+}
+
+##
+# @brief sanitize csv strings
+#
+#
+function sanitize(e)
+{
+	gsub(/[,"]/, "", e)
+	return e
 }
 
 ##
