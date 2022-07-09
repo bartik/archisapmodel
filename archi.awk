@@ -10,6 +10,8 @@ BEGIN {
 	g_counter_cpu = 0
 	g_counter_networkport = 0
 	g_counter_eid = -1
+	# global variable holding the currently processed object
+	g_processing = "Unknown"
 	# field separator
 	FS = ","
 	# config array key for the ID string template
@@ -18,18 +20,26 @@ BEGIN {
 	# prefix=...
 	g_key_prefix = "global|prefix"
 	g_key_function = "global|function"
+	g_key_multiply = "global|multiply"
+	g_key_ignore = "global|ignore"
+	g_key_fproperties = "global|properties"
+	g_key_felements = "global|elements"
+	g_key_frelations = "global|relations"
+	g_key_merge = "global|merge"
 	g_key_format_cim = "format|cim"
 	g_key_format_db = "format|db"
 	g_key_separator_propertyname = "separator|property_name"
 	g_key_separator_namevalue = "separator|name_value"
 	g_key_separator_namewords = "separator|name_words"
-	g_key_attribute_documentation = "attribute|documentation"
-	g_key_attribute_name = "attribute|name"
-	g_key_attribute_type = "attribute|type"
-	g_key_attribute_SID = "attribute|sid"
-	g_key_attribute_DeviceID = "attribute|deviceid"
-	g_key_attribute_instance_type = "attribute|instance_type"
+	g_key_property_documentation = "property|documentation"
+	g_key_property_name = "property|name"
+	g_key_property_type = "property|type"
+	g_key_property_SID = "property|sid"
+	g_key_property_DeviceID = "property|deviceid"
+	g_key_property_instance_type = "property|instance_type"
 	g_key_specialization_default = "specialization|default"
+	g_key_sanitize = "sanitize|"
+	g_key_splitter = "splitter|"
 	# Diagnostic levels level2string
 	DEBUG_LEVEL[1] = "CRIT"
 	DEBUG_LEVEL[2] = "WARN"
@@ -53,6 +63,8 @@ BEGIN {
 	split("", g_config, FS)
 	# reset object array
 	split("", g_object, FS)
+	# reset duplicate check array
+	split("", g_duplicate, FS)
 }
 
 ##
@@ -96,10 +108,10 @@ FNR == NR {
 # 
 FNR == 3 {
 	diagMsg(DEBUG_LEVEL["INFO"], sprintf("Prefix raw = \"%s\"", $0))
-	config[g_key_prefix] = sprintf("id-%s-", replaceBlankAll($0))
-	l_index = 35 - length(config[g_key_prefix])
+	g_config[g_key_prefix] = sprintf("id-%s-", replaceBlankAll($0))
+	l_index = 35 - length(g_config[g_key_prefix])
 	if (l_index > 0) {
-		g_config[g_key_prefix] = sprintf("%s%%0%dd", config[g_key_prefix], l_index)
+		g_config[g_key_prefix] = sprintf("%s%%0%dd", g_config[g_key_prefix], l_index)
 		diagMsg(DEBUG_LEVEL["INFO"], sprintf("Prefix = \"%s\"", g_config[g_key_prefix]))
 	}
 	next
@@ -116,12 +128,19 @@ FNR == 5 {
 	diagMsg(DEBUG_LEVEL["INFO"], sprintf("Function raw = \"%s\"", $0))
 	# print the last entry from previous file
 	if (g_config[g_key_function] ~ g_config[g_key_format_cim]) {
-		diagArray(g_object, "g_object")
+		diagArray(DEBUG_LEVEL["INFO"], g_object, "g_object")
 		diagMsg(DEBUG_LEVEL["INFO"], "=============================================================")
 		split("", g_object, FS)
 	}
 	g_config[g_key_function] = removeBlankStartAndEnd($0)
 	diagMsg(DEBUG_LEVEL["INFO"], sprintf("Function = \"%s\"", g_config[g_key_function]))
+	next
+}
+
+##
+# @brief Skip header
+#
+FNR < 7 {
 	next
 }
 
@@ -141,47 +160,118 @@ FNR == 5 {
 # SapVersionInfo , String , 123, patch 456, changelist 7890123
 # 
 /^\*/ && g_config[g_key_function] ~ g_config[g_key_format_cim] {
-	diagArray(g_object, "g_object")
-	diagMsg(DEBUG_LEVEL["INFO"], "=============================================================")
+	diagArray(DEBUG_LEVEL["INFO"], g_object, "g_object")
+	# do not reset specific objects
 	if (g_counter_eid > -1) {
-		printObject(g_object, objectID())
+		diagMsg(DEBUG_LEVEL["INFO"], "=============================================================")
+		diagMsg(DEBUG_LEVEL["INFO"], g_processing)
+		diagMsg(DEBUG_LEVEL["INFO"], "=============================================================")
+		if (g_processing !~ g_config[g_key_merge]) {
+			regObject(g_object)
+			diagMsg(DEBUG_LEVEL["INFO"], ">>> RESET - g_object - RESET <<<")
+			split("", g_object, FS)
+		} else {
+			diagMsg(DEBUG_LEVEL["INFO"], sprintf("Merging %s/%s with upcoming object.", g_object[g_config[g_key_property_type]], objectName(g_object)))
+			diagArray(DEBUG_LEVEL["INFO"], g_object, "g_object")
+		}
+		diagMsg(DEBUG_LEVEL["INFO"], "=============================================================")
 	} else {
 		g_counter_eid++
 	}
-	diagMsg(DEBUG_LEVEL["INFO"], "=============================================================")
-	split("", g_object, FS)
 	next
 }
 
 g_config[g_key_function] ~ g_config[g_key_format_cim] {
+	diagMsg(DEBUG_LEVEL["INFO"], sprintf("(processing) %s", $0))
 	# check for separator
 	l_propsep = parameterSeparator($0)
-	# special case when the separator is a comman
-	if (l_propsep ~ /^,$/) {
+	if (length(l_propsep) == 1) {
+		$2 = sprintf("String[] sep=%1s", l_propsep)
 	}
-	# this is the proper case
-	if (NF == 3) {
-		$1 = removeBlankStartAndEnd($1)
-		$2 = removeBlankStartAndEnd($2)
-		$3 = removeBlankStartAndEnd($3)
-		if (length(l_propsep) == 1) {
-			parameterSplit($1, $3, l_propsep)
-		} else {
-			g_object[$1] = $3
+	# special case when comma is also the properties separator
+	if (NF > 3) {
+		v = $3
+		for (j = 4; j <= NF; j++) {
+			v = v "," $j
+		}
+		gsub(/[[:blank:]]+,/, ",", v)
+		gsub(/,[[:blank:]]+/, ",", v)
+		$3 = v
+	}
+	# special case with a omitted delimiter
+	for (j in g_config) {
+		if (g_key_splitter ~ j) {
+			k = substr(j, length(j), 1)
+			if ($1 ~ g_config[j]) {
+				l_propsep = k
+				$2 = sprintf("String[] sep=%1s", l_propsep)
+				diagMsg(DEBUG_LEVEL["INFO"], sprintf("(%s/%s) %s --> %s", g_config[j], j, $1, $3))
+			}
 		}
 	}
+	# special case with tennat databases
+	if ($1 ~ /SystemDB DBCredentials/) {
+		$1 = "DBCredentials"
+		diagMsg(DEBUG_LEVEL["INFO"], sprintf("(SystemDB DBCredentials) %s --> %s", $1, $3))
+	}
+	# special case SapVersionInfo
+	if ($1 ~ /SapVersionInfo/) {
+		v = "version " removeBlankStartAndEnd($3)
+		gsub(/[[:blank:]]+/, g_config[g_key_separator_namevalue], v)
+		diagMsg(DEBUG_LEVEL["INFO"], sprintf("(SapVersionInfo) %s --> %s", $1, $3))
+		$3 = v
+	}
+	# special case DBCredentials
+	if ($1 ~ /DBCredentials/) {
+		v = "Name=" removeBlankStartAndEnd($3)
+		diagMsg(DEBUG_LEVEL["INFO"], sprintf("(DBCredentials) %s --> %s", $1, $3))
+		$3 = v
+	}
+	# this is the proper case
+	$1 = removeBlankStartAndEnd($1)
+	$2 = removeBlankStartAndEnd($2)
+	$3 = removeBlankStartAndEnd($3)
+	if (length(l_propsep) == 1) {
+		if ($1 ~ g_config[g_key_multiply]) {
+			# create a new object from attribute
+			split("", n_object, FS)
+			n_object["CreationClassName"] = sprintf("SAP_ITSAM%s", $1)
+			n_object["CSCreationClassName"] = g_object["CreationClassName"]
+			n_object["CSName"] = g_object["Name"]
+			parameterSplit(n_object, "", $3, l_propsep)
+			if (length(n_object["Name"]) < 1) {
+				n_object["Name"] = objectName(n_object)
+			}
+			regObject(n_object)
+			split("", n_object, FS)
+		} else {
+			# add as properties only
+			parameterSplit(g_object, $1 g_config[g_key_separator_propertyname], $3, l_propsep)
+		}
+	} else {
+		# do not overwrite existing attributes
+		if (length(g_object[$1]) < 1) {
+			g_object[$1] = $3
+			diagMsg(DEBUG_LEVEL["INFO"], sprintf("(adding) %s = %s", $1, $3))
+		}
+	}
+	# every CIM oject muss have a CreationClassName
+	if ($1 ~ /CreationClassName/) {
+		g_processing = $3
+	}
+	next
 }
 
 END {
 	# flush objects 
 	if (g_config[g_key_function] ~ g_config[g_key_format_cim]) {
-		diagArray(g_object, "g_object")
-		diagMsg(DEBUG_LEVEL["INFO"], "=============================================================")
-		printObject(g_object, objectID())
-		diagMsg(DEBUG_LEVEL["INFO"], "=============================================================")
+		diagArray(DEBUG_LEVEL["INFO"], g_object, "g_object")
+		diagMsg(DEBUG_LEVEL["INFO"], "=== END =====================================================")
+		regObject(g_object)
+		diagMsg(DEBUG_LEVEL["INFO"], "=== END =====================================================")
 		split("", g_object, FS)
 	}
-	# diagArray(g_config,"g_config")
+	diagArray(DEBUG_LEVEL["INFO"], g_config, "g_config")
 }
 
 
@@ -204,14 +294,14 @@ function alen(a, i, k)
 # key to filter output. If nothing specified the
 # whole array content will be printed.
 #
-function diagArray(tmpArray, tmpName, tmpFilter, k)
+function diagArray(tmpLevel, tmpArray, tmpName, tmpFilter, k)
 {
 	if (length(tmpFilter) == 0) {
 		tmpFilter = ".*"
 	}
 	for (k in tmpArray) {
 		if (k ~ tmpFilter) {
-			diagMsg(DEBUG_LEVEL["INFO"], sprintf("%s[\"%s\"] = %s", tmpName, k, tmpArray[k]))
+			diagMsg(tmpLevel, sprintf("%s[\"%s\"] = %s", tmpName, k, tmpArray[k]))
 		}
 	}
 }
@@ -228,8 +318,23 @@ function diagMsg(tmpLevel, tmpMessage)
 		tmpLevel = DEBUG_MAXLVL
 	}
 	if (tmpLevel <= ARCHI_DEBUG) {
-		printf "ARCHI %s: %s\n", DEBUG_LEVEL[tmpLevel], tmpMessage
+		stdMsg(DEBUG_LEVEL[tmpLevel], tmpMessage "\n")
 	}
+}
+
+##
+# @brief check if key unique
+#
+function isUnique(tmpObject, s, n, t, k)
+{
+	t = 1
+	s = objectSpecialization(tmpObject)
+	n = objectName(tmpObject)
+	k = sprintf("%s|%s", s, n)
+	if (k in g_duplicate) {
+		t = 0
+	}
+	return t
 }
 
 ##
@@ -253,30 +358,46 @@ function objectID(e)
 #
 function objectName(tmpObject, s, n)
 {
-	s = tmpObject[g_config[g_key_attribute_type]]
-	n = tmpObject[g_config[g_key_attribute_name]]
+	s = objectSpecialization(tmpObject)
+	n = tmpObject[g_config[g_key_property_name]]
 	if (length(n) < 1) {
 		# build a name for SAPInstance
 		n = "Unknown"
 		if (s ~ /SAPInstance/) {
-			n = sprintf("SAP %s %s", tmpObject[g_config[g_key_attribute_SID]], tmpObject[g_config[g_key_attribute_instance_type]])
+			n = sprintf("SAP %s %s", tmpObject[g_config[g_key_property_SID]], tmpObject[g_config[g_key_property_instance_type]])
 		} else if (s ~ /SAP_ITSAMProcessor/) {
-			if (length(tmpObject[g_config[g_key_attribute_DeviceID]]) > 0) {
-				n = sprintf("CPU %d", tmpObject[g_config[g_key_attribute_DeviceID]])
+			if (length(tmpObject[g_config[g_key_property_DeviceID]]) > 0) {
+				n = sprintf("CPU %d", tmpObject[g_config[g_key_property_DeviceID]])
 			} else {
 				n = sprintf("CPU %d", g_counter_cpu++)
 			}
 		} else if (s ~ /SAP_ITSAMNetworkPort/) {
-			if (length(tmpObject[g_config[g_key_attribute_DeviceID]]) > 0) {
-				n = sprintf("%s", tmpObject[g_config[g_key_attribute_DeviceID]])
+			if (length(tmpObject[g_config[g_key_property_DeviceID]]) > 0) {
+				n = sprintf("%s", tmpObject[g_config[g_key_property_DeviceID]])
 			} else {
 				n = sprintf("Network port %d", g_counter_networkport++)
 			}
+		} else if (s ~ /SAP_ITSAMConnectAddress/) {
+			n = sprintf("%s:%s", tmpObject["Host"], tmpObject["Port"])
 		}
+		# Save the name in the object to print as parameter
+		# if it does not exist
+		tmpObject[g_config[g_key_property_name]] = n
 	} else {
 		n = replaceBlankAll(n, g_config[g_key_separator_namewords])
 	}
 	return n
+}
+
+##
+# @brief return object specialization
+#
+# This function will return the CreationClassName
+#
+function objectSpecialization(tmpObject, s)
+{
+	s = tmpObject[g_config[g_key_property_type]]
+	return s
 }
 
 ##
@@ -287,7 +408,7 @@ function objectName(tmpObject, s, n)
 #
 function objectType(tmpObject, s, t)
 {
-	s = tmpObject[g_config[g_key_attribute_type]]
+	s = objectSpecialization(tmpObject)
 	t = g_config["specialization|" s]
 	if (length(t) < 1) {
 		t = g_config[g_key_specialization_default]
@@ -347,17 +468,18 @@ function parameterSeparator(tmpLine, i, s)
 #			g_object["Feature_1"] = MESSAGESERVER
 #			g_object["Feature_2"] = ENQUE
 #
-function parameterSplit(tmpAttribute, tmpLine, s, i, j, c, p, v, t)
+function parameterSplit(tmpObject, tmpAttribute, tmpLine, s, i, j, c, p, v, t, k)
 {
-	t = tmpAttribute g_config[g_key_separator_propertyname]
+	k = 1
+	t = tmpAttribute
 	c = split(tmpLine, p, s)
 	for (j = 1; j <= c; j++) {
 		if (length(p[j]) > 0) {
 			i = split(p[j], v, g_config[g_key_separator_namevalue])
 			if (i > 1) {
-				g_object[t v[1]] = v[2]
+				tmpObject[t v[1]] = v[2]
 			} else {
-				g_object[t j] = p[j]
+				tmpObject[t k++] = p[j]
 			}
 		}
 	}
@@ -369,14 +491,18 @@ function parameterSplit(tmpAttribute, tmpLine, s, i, j, c, p, v, t)
 # _elements.csv
 # "ID","Type","Name","Documentation","Specialization"
 #
-function printELEMENT(eID, eType, eName, eDocumentation, eSpecialization)
+function printELEMENT(eID, eType, eName, eDocumentation, eSpecialization, m)
 {
 	eName = sanitize(eName)
 	eDocumentation = sanitize(eDocumentation)
-	eSpecialization = sanitize(eDocumentation)
-	printf "ARCHI ELEMENTS: \"%s\",\"%s\",\"%s\",\"%s\",\"%s\"\n", eID, eType, eName, eDocumentation, eSpecialization
+	eSpecialization = sanitize(eSpecialization)
+	m = sprintf("\"%s\",\"%s\",\"%s\",\"%s\",\"%s\"\n", eID, eType, eName, eDocumentation, eSpecialization)
+	stdMsg(g_config[g_key_felements], m)
 }
 
+##
+# @brief print object
+#
 function printObject(tmpObject, e, t, n, d, s, k)
 {
 	# get the archimate element to which the "CreationClassName" maps (see ini file)
@@ -384,17 +510,19 @@ function printObject(tmpObject, e, t, n, d, s, k)
 	# determine the object name based on woodoo
 	n = objectName(tmpObject)
 	# determine documentation based on woodoo
-	d = tmpObject[g_config[g_key_attribute_documentation]]
+	d = tmpObject[g_config[g_key_property_documentation]]
 	if (length(d) < 1) {
 		d = n
 	}
 	# specialization
-	s = tmpObject[g_config[g_key_attribute_type]]
-	# print element
-	printELEMENT(e, t, n, d, s)
-	# print properties
-	for (k in tmpObject) {
-		printPROPERTY(e, k, tmpObject[k])
+	s = objectSpecialization(tmpObject)
+	if (s !~ g_config[g_key_ignore]) {
+		# print element
+		printELEMENT(e, t, n, d, s)
+		# print properties
+		for (k in tmpObject) {
+			printPROPERTY(e, k, tmpObject[k])
+		}
 	}
 }
 
@@ -404,9 +532,12 @@ function printObject(tmpObject, e, t, n, d, s, k)
 # _properties.csv
 # "ID","Key","Value"
 #
-function printPROPERTY(eID, eKey, eValue)
+function printPROPERTY(eID, eKey, eValue, m)
 {
-	printf "ARCHI PROPERTIES: \"%s\",\"%s\",\"%s\"\n", eID, eKey, eValue
+	eKey = sanitize(eKey)
+	eValue = sanitize(eValue)
+	m = sprintf("\"%s\",\"%s\",\"%s\"\n", eID, eKey, eValue)
+	stdMsg(g_config[g_key_fproperties], m)
 }
 
 ##
@@ -415,9 +546,44 @@ function printPROPERTY(eID, eKey, eValue)
 # _relation.csv
 # "ID","Type","Name","Documentation","Source","Target","Specialization"
 #
-function printRELATION(eID, eType, eName, eDocumentation, eSource, eTarget, eSpecialization)
+function printRELATION(eID, eType, eName, eDocumentation, eSource, eTarget, eSpecialization, m)
 {
-	printf "ARCHI RELATIONS: \"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\"\n", eID, eType, eName, eDocumentation, eSource, eTarget, eSpecialization
+	eName = sanitize(eName)
+	eDocumentation = sanitize(eDocumentation)
+	eSource = sanitize(eSource)
+	eTarget = sanitize(eTarget)
+	eSpecialization = sanitize(eSpecialization)
+	m = sprintf("\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\"\n", eID, eType, eName, eDocumentation, eSource, eTarget, eSpecialization)
+	stdMsg(g_config[g_key_frelations], m)
+}
+
+##
+# @brief register and print object
+#
+# It is possible to provide a ID
+# as a parameter if the ID has to
+# be generated beforehand.
+#
+function regObject(tmpObject, e, k, s, n)
+{
+	# check if it is unique
+	if (isUnique(tmpObject)) {
+		s = objectSpecialization(tmpObject)
+		n = objectName(tmpObject)
+		# generate object id
+		if (length(e) < 1) {
+			e = objectID()
+		}
+		# print the object
+		printObject(tmpObject, e)
+		# register the object with its id
+		k = sprintf("%s|%s", s, n)
+		g_duplicate[k] = e
+		return 1
+	} else {
+		# do not register if not unique
+		return 0
+	}
 }
 
 ##
@@ -471,10 +637,14 @@ function replaceBlankAll(tmpLine, r)
 ##
 # @brief sanitize csv strings
 #
-#
-function sanitize(e)
+function sanitize(e, j, k)
 {
-	gsub(/[,"]/, "", e)
+	for (j in g_config) {
+		if (g_key_sanitize ~ j) {
+			k = substr(j, length(j), 1)
+			gsub(k, g_config[j], e)
+		}
+	}
 	return e
 }
 
