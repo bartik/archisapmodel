@@ -19,6 +19,7 @@ BEGIN {
 	# [global]
 	# prefix=...
 	g_key_prefix = "global|prefix"
+	# general purpose definitions
 	g_key_function = "global|function"
 	g_key_multiply = "global|multiply"
 	g_key_ignore = "global|ignore"
@@ -28,17 +29,25 @@ BEGIN {
 	g_key_merge = "global|merge"
 	g_key_format_cim = "format|cim"
 	g_key_format_db = "format|db"
+	# characters used to separates items in lists
 	g_key_separator_propertyname = "separator|property_name"
 	g_key_separator_namevalue = "separator|name_value"
 	g_key_separator_namewords = "separator|name_words"
+	g_key_separator_listitems = "separator|list_items"
+	# maps cim attributes to archi properties
 	g_key_property_documentation = "property|documentation"
 	g_key_property_name = "property|name"
 	g_key_property_type = "property|type"
 	g_key_property_SID = "property|sid"
 	g_key_property_DeviceID = "property|deviceid"
 	g_key_property_instance_type = "property|instance_type"
+	g_key_property_altName = "property|altname"
+	g_key_property_parent = "property|parentid"
+	# mapping CreationClassName to Archimate
 	g_key_specialization_default = "specialization|default"
+	# cleanup string before writing to file
 	g_key_sanitize = "sanitize|"
+	# define cim attributes to split into separate objects
 	g_key_splitter = "splitter|"
 	# Diagnostic levels level2string
 	DEBUG_LEVEL[1] = "CRIT"
@@ -126,12 +135,6 @@ FNR == 3 {
 # 
 FNR == 5 {
 	diagMsg(DEBUG_LEVEL["INFO"], sprintf("Function raw = \"%s\"", $0))
-	# print the last entry from previous file
-	if (g_config[g_key_function] ~ g_config[g_key_format_cim]) {
-		diagArray(DEBUG_LEVEL["INFO"], g_object, "g_object")
-		diagMsg(DEBUG_LEVEL["INFO"], "=============================================================")
-		split("", g_object, FS)
-	}
 	g_config[g_key_function] = removeBlankStartAndEnd($0)
 	diagMsg(DEBUG_LEVEL["INFO"], sprintf("Function = \"%s\"", g_config[g_key_function]))
 	next
@@ -161,17 +164,17 @@ FNR < 7 {
 # 
 /^\*/ && g_config[g_key_function] ~ g_config[g_key_format_cim] {
 	diagArray(DEBUG_LEVEL["INFO"], g_object, "g_object")
-	# do not reset specific objects
 	if (g_counter_eid > -1) {
 		diagMsg(DEBUG_LEVEL["INFO"], "=============================================================")
 		diagMsg(DEBUG_LEVEL["INFO"], g_processing)
 		diagMsg(DEBUG_LEVEL["INFO"], "=============================================================")
+		# do not reset specific objects
 		if (g_processing !~ g_config[g_key_merge]) {
 			regObject(g_object)
 			diagMsg(DEBUG_LEVEL["INFO"], ">>> RESET - g_object - RESET <<<")
 			split("", g_object, FS)
 		} else {
-			diagMsg(DEBUG_LEVEL["INFO"], sprintf("Merging %s/%s with upcoming object.", g_object[g_config[g_key_property_type]], objectName(g_object)))
+			diagMsg(DEBUG_LEVEL["INFO"], sprintf("Merging %s/%s with upcoming object.", getObjectProperty(g_object, g_key_property_type), getObjectName(g_object)))
 			diagArray(DEBUG_LEVEL["INFO"], g_object, "g_object")
 		}
 		diagMsg(DEBUG_LEVEL["INFO"], "=============================================================")
@@ -181,7 +184,7 @@ FNR < 7 {
 	next
 }
 
-g_config[g_key_function] ~ g_config[g_key_format_cim] {
+! /^[[:blank:]]*$/ && g_config[g_key_function] ~ g_config[g_key_format_cim] {
 	diagMsg(DEBUG_LEVEL["INFO"], sprintf("(processing) %s", $0))
 	# check for separator
 	l_propsep = parameterSeparator($0)
@@ -233,17 +236,22 @@ g_config[g_key_function] ~ g_config[g_key_format_cim] {
 	$3 = removeBlankStartAndEnd($3)
 	if (length(l_propsep) == 1) {
 		if ($1 ~ g_config[g_key_multiply]) {
-			# create a new object from attribute
-			split("", n_object, FS)
-			n_object["CreationClassName"] = sprintf("SAP_ITSAM%s", $1)
-			n_object["CSCreationClassName"] = g_object["CreationClassName"]
-			n_object["CSName"] = g_object["Name"]
-			parameterSplit(n_object, "", $3, l_propsep)
-			if (length(n_object["Name"]) < 1) {
-				n_object["Name"] = objectName(n_object)
+			# specialization
+			l_parent_type = getObjectSpecialization(g_object)
+			# check if the object should be skipped
+			if (l_parent_type !~ g_config[g_key_ignore]) {
+				# create a new object from attribute
+				split("", n_object, FS)
+				l_parent_id = getObjectID(g_object)
+				setObjectProperty(n_object, g_key_property_parent, l_parent_id)
+				setObjectProperty(n_object, g_key_property_type, sprintf("SAP_ITSAM%s", $1))
+				n_object["CSCreationClassName"] = getObjectProperty(g_object, g_key_property_type)
+				n_object["CSName"] = getObjectName(g_object)
+				parameterSplit(n_object, "", $3, l_propsep)
+				diagArray(DEBUG_LEVEL["INFO"], n_object, "n_object")
+				regObject(n_object)
+				split("", n_object, FS)
 			}
-			regObject(n_object)
-			split("", n_object, FS)
 		} else {
 			# add as properties only
 			parameterSplit(g_object, $1 g_config[g_key_separator_propertyname], $3, l_propsep)
@@ -255,7 +263,7 @@ g_config[g_key_function] ~ g_config[g_key_format_cim] {
 			diagMsg(DEBUG_LEVEL["INFO"], sprintf("(adding) %s = %s", $1, $3))
 		}
 	}
-	# every CIM oject muss have a CreationClassName
+	# every CIM oject must have a CreationClassName
 	if ($1 ~ /CreationClassName/) {
 		g_processing = $3
 	}
@@ -272,6 +280,7 @@ END {
 		split("", g_object, FS)
 	}
 	diagArray(DEBUG_LEVEL["INFO"], g_config, "g_config")
+	diagArray(DEBUG_LEVEL["INFO"], g_duplicate, "g_duplicate")
 }
 
 
@@ -323,30 +332,57 @@ function diagMsg(tmpLevel, tmpMessage)
 }
 
 ##
-# @brief check if key unique
+# @brief return object attribute
 #
-function isUnique(tmpObject, s, n, t, k)
+# return one of alternative object names
+#
+function getObjectAltName(tmpObject, r)
 {
-	t = 1
-	s = objectSpecialization(tmpObject)
-	n = objectName(tmpObject)
-	k = sprintf("%s|%s", s, n)
-	if (k in g_duplicate) {
-		t = 0
-	}
-	return t
+	r = getObjectAttribute(tmpObject, g_config[g_key_property_altName], g_config[g_key_separator_listitems])
+	return r
 }
 
 ##
-# @brief return object id
+# @brief return object attribute
 #
-# This function will construct a id for
-# the archimate object.
+# Go throug the supplied list of
+# attributes and return the
+# value of array with that
+# attribute as key if found.
+# Returns only the value for first
+# key match from list.
 #
-function objectID(e)
+function getObjectAttribute(tmpObject, tmpList, s, k, j, l, r)
 {
-	e = sprintf(g_config[g_key_prefix], g_counter_eid++)
-	diagMsg(DEBUG_LEVEL["INFO"], sprintf("eID=%s", e))
+	r = "Unknown"
+	l = split(tmpList, k, s)
+	diagMsg(DEBUG_LEVEL["INFO"], sprintf("List length=%d", l))
+	diagMsg(DEBUG_LEVEL["INFO"], sprintf("List=%s", tmpList))
+	diagArray(DEBUG_LEVEL["INFO"], k, "altName")
+	diagArray(DEBUG_LEVEL["INFO"], tmpObject, "tmpObject")
+	for (j = 1; j <= l; j++) {
+		diagMsg(DEBUG_LEVEL["INFO"], sprintf("Attribute[%d]=%s", j, k[j]))
+		if (k[j] in tmpObject) {
+			r = tmpObject[k[j]]
+			diagMsg(DEBUG_LEVEL["INFO"], sprintf("%s=%s", k[j], r))
+			return r
+		}
+	}
+	return r
+}
+
+##
+# @brief try to find object id
+#
+#
+function getObjectID(tmpObject, e)
+{
+	if (isUnique(tmpObject) == 0) {
+		e = g_duplicate[k]
+	} else {
+		e = newObjectID()
+		g_duplicate[k] = e
+	}
 	return e
 }
 
@@ -356,13 +392,17 @@ function objectID(e)
 # This function will construct a name for
 # the archimate object.
 #
-function objectName(tmpObject, s, n)
+function getObjectName(tmpObject, s, n)
 {
-	s = objectSpecialization(tmpObject)
-	n = tmpObject[g_config[g_key_property_name]]
+	s = getObjectSpecialization(tmpObject)
+	# determine if the object already has a name
+	n = ""
+	if (g_config[g_key_property_name] in tmpObject) {
+		n = tmpObject[g_config[g_key_property_name]]
+	}
 	if (length(n) < 1) {
-		# build a name for SAPInstance
-		n = "Unknown"
+		# Try for alternative names
+		n = getObjectAltName(tmpObject)
 		if (s ~ /SAPInstance/) {
 			n = sprintf("SAP %s %s", tmpObject[g_config[g_key_property_SID]], tmpObject[g_config[g_key_property_instance_type]])
 		} else if (s ~ /SAP_ITSAMProcessor/) {
@@ -380,9 +420,6 @@ function objectName(tmpObject, s, n)
 		} else if (s ~ /SAP_ITSAMConnectAddress/) {
 			n = sprintf("%s:%s", tmpObject["Host"], tmpObject["Port"])
 		}
-		# Save the name in the object to print as parameter
-		# if it does not exist
-		tmpObject[g_config[g_key_property_name]] = n
 	} else {
 		n = replaceBlankAll(n, g_config[g_key_separator_namewords])
 	}
@@ -390,11 +427,24 @@ function objectName(tmpObject, s, n)
 }
 
 ##
+# @brief get object property
+#
+#
+function getObjectProperty(tmpObject, tmpPropertyKey, s)
+{
+	s = "This property does not exist !"
+	if (g_config[tmpPropertyKey] in tmpObject) {
+		s = tmpObject[g_config[tmpPropertyKey]]
+	}
+	return s
+}
+
+##
 # @brief return object specialization
 #
 # This function will return the CreationClassName
 #
-function objectSpecialization(tmpObject, s)
+function getObjectSpecialization(tmpObject, s)
 {
 	s = tmpObject[g_config[g_key_property_type]]
 	return s
@@ -406,14 +456,42 @@ function objectSpecialization(tmpObject, s)
 # This function will return the archimate base type
 # for the given cim objectClass.
 #
-function objectType(tmpObject, s, t)
+function getObjectType(tmpObject, s, t)
 {
-	s = objectSpecialization(tmpObject)
+	s = getObjectSpecialization(tmpObject)
 	t = g_config["specialization|" s]
 	if (length(t) < 1) {
 		t = g_config[g_key_specialization_default]
 	}
 	return t
+}
+
+##
+# @brief check if key unique
+#
+function isUnique(tmpObject, s, n, k, r)
+{
+	r = 1
+	s = getObjectSpecialization(tmpObject)
+	n = getObjectName(tmpObject)
+	k = sprintf("%s|%s", s, n)
+	if (k in g_duplicate) {
+		r = 0
+	}
+	return r
+}
+
+##
+# @brief return object id
+#
+# This function will construct a id for
+# the archimate object.
+#
+function newObjectID(r)
+{
+	r = sprintf(g_config[g_key_prefix], g_counter_eid++)
+	diagMsg(DEBUG_LEVEL["INFO"], sprintf("eID=%s", r))
+	return r
 }
 
 ##
@@ -506,23 +584,21 @@ function printELEMENT(eID, eType, eName, eDocumentation, eSpecialization, m)
 function printObject(tmpObject, e, t, n, d, s, k)
 {
 	# get the archimate element to which the "CreationClassName" maps (see ini file)
-	t = objectType(tmpObject)
-	# determine the object name based on woodoo
-	n = objectName(tmpObject)
-	# determine documentation based on woodoo
-	d = tmpObject[g_config[g_key_property_documentation]]
+	t = getObjectType(tmpObject)
+	# determine the object name
+	n = getObjectName(tmpObject)
+	# determine documentation
+	d = getObjectProperty(tmpObject, g_key_property_documentation)
 	if (length(d) < 1) {
 		d = n
 	}
 	# specialization
-	s = objectSpecialization(tmpObject)
-	if (s !~ g_config[g_key_ignore]) {
-		# print element
-		printELEMENT(e, t, n, d, s)
-		# print properties
-		for (k in tmpObject) {
-			printPROPERTY(e, k, tmpObject[k])
-		}
+	s = getObjectSpecialization(tmpObject)
+	# print element
+	printELEMENT(e, t, n, d, s)
+	# print properties
+	for (k in tmpObject) {
+		printPROPERTY(e, k, tmpObject[k])
 	}
 }
 
@@ -564,25 +640,16 @@ function printRELATION(eID, eType, eName, eDocumentation, eSource, eTarget, eSpe
 # as a parameter if the ID has to
 # be generated beforehand.
 #
-function regObject(tmpObject, e, k, s, n)
+function regObject(tmpObject, e)
 {
-	# check if it is unique
-	if (isUnique(tmpObject)) {
-		s = objectSpecialization(tmpObject)
-		n = objectName(tmpObject)
-		# generate object id
+	# check if the object should be skipped
+	if (toIgnore(tmpObject) == 0 && isUnique(tmpObject) == 1) {
+		# get objectID if not provided
 		if (length(e) < 1) {
-			e = objectID()
+			e = getObjectID(tmpObject)
 		}
 		# print the object
 		printObject(tmpObject, e)
-		# register the object with its id
-		k = sprintf("%s|%s", s, n)
-		g_duplicate[k] = e
-		return 1
-	} else {
-		# do not register if not unique
-		return 0
 	}
 }
 
@@ -649,6 +716,15 @@ function sanitize(e, j, k)
 }
 
 ##
+# @brief get object property
+#
+#
+function setObjectProperty(tmpObject, tmpPropertyKey, tmpValue)
+{
+	tmpObject[g_config[tmpPropertyKey]] = tmpValue
+}
+
+##
 # @brief Print STanDard MeSaGge
 #
 # A central location to do all standard
@@ -657,4 +733,19 @@ function sanitize(e, j, k)
 function stdMsg(tmpFile, tmpMessage)
 {
 	printf "ARCHI %s: %s", tmpFile, tmpMessage
+}
+
+##
+# @brief check if key should be ignored
+#
+function toIgnore(tmpObject, s, r)
+{
+	r = 0
+	# specialization
+	s = getObjectSpecialization(tmpObject)
+	# check if the object should be skipped
+	if (s ~ g_config[g_key_ignore]) {
+		r = 1
+	}
+	return r
 }
