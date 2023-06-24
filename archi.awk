@@ -137,6 +137,9 @@ FNR == 5 {
 	diagMsg(DEBUG_LEVEL["INFO"], sprintf("Function raw = \"%s\"", $0))
 	g_config[g_key_function] = removeBlankStartAndEnd($0)
 	diagMsg(DEBUG_LEVEL["INFO"], sprintf("Function = \"%s\"", g_config[g_key_function]))
+	# initialize file local variables
+	l_previous_type = "N/A"
+	l_previous_name = "N/A"
 	next
 }
 
@@ -170,9 +173,27 @@ FNR < 7 {
 		diagMsg(DEBUG_LEVEL["INFO"], "=============================================================")
 		# do not reset specific objects
 		if (g_processing !~ g_config[g_key_merge]) {
+			# save object to output
 			regObject(g_object)
+			# save the name of the object if its type is different
+			# from it's predecessors type.
+			diagMsg(DEBUG_LEVEL["INFO"], sprintf("before Previous type: %s", l_previous_type))
+			diagMsg(DEBUG_LEVEL["INFO"], sprintf("before Now type: %s", getObjectType(g_object)))
+			diagMsg(DEBUG_LEVEL["INFO"], sprintf("before Previous name: %s", l_previous_name))
+			if (l_previous_name == getObjectName(g_object)) {
+				l_previous_name = getObjectProperty(g_object, g_key_prevname)
+			} else {
+				l_previous_name = getObjectName(g_object)
+			}
+			l_previous_type = getObjectType(g_object)
+			diagMsg(DEBUG_LEVEL["INFO"], sprintf("after Previous type: %s", l_previous_type))
+			diagMsg(DEBUG_LEVEL["INFO"], sprintf("after Now type: %s", getObjectType(g_object)))
+			diagMsg(DEBUG_LEVEL["INFO"], sprintf("after Previous name: %s", l_previous_name))
 			diagMsg(DEBUG_LEVEL["INFO"], ">>> RESET - g_object - RESET <<<")
+			# reset the object
 			split("", g_object, FS)
+			# restore the saved name of the previous object
+			setObjectProperty(g_object, g_key_prevname, l_previous_name)
 		} else {
 			diagMsg(DEBUG_LEVEL["INFO"], sprintf("Merging %s/%s with upcoming object.", getObjectProperty(g_object, g_key_property_type), getObjectName(g_object)))
 			diagArray(DEBUG_LEVEL["INFO"], g_object, "g_object")
@@ -245,8 +266,8 @@ FNR < 7 {
 				l_parent_id = getObjectID(g_object)
 				setObjectProperty(n_object, g_key_property_parent, l_parent_id)
 				setObjectProperty(n_object, g_key_property_type, sprintf("SAP_ITSAM%s", $1))
-				n_object["CSCreationClassName"] = getObjectProperty(g_object, g_key_property_type)
-				n_object["CSName"] = getObjectName(g_object)
+				setObjectPropertyRaw(n_object, "CSCreationClassName", getObjectProperty(g_object, g_key_property_type))
+				setObjectPropertyRaw(n_object, "CSName", getObjectName(g_object))
 				parameterSplit(n_object, "", $3, l_propsep)
 				diagArray(DEBUG_LEVEL["INFO"], n_object, "n_object")
 				regObject(n_object)
@@ -375,8 +396,11 @@ function getObjectAttribute(tmpObject, tmpList, s, k, j, l, r)
 # @brief try to find object id
 #
 #
-function getObjectID(tmpObject, e)
+function getObjectID(tmpObject, e, s, n, k)
 {
+	s = getObjectSpecialization(tmpObject)
+	n = getObjectName(tmpObject)
+	k = sprintf("%s|%s", s, n)
 	if (isUnique(tmpObject) == 0) {
 		e = g_duplicate[k]
 	} else {
@@ -396,10 +420,7 @@ function getObjectName(tmpObject, s, n)
 {
 	s = getObjectSpecialization(tmpObject)
 	# determine if the object already has a name
-	n = ""
-	if (g_config[g_key_property_name] in tmpObject) {
-		n = tmpObject[g_config[g_key_property_name]]
-	}
+	n = getObjectProperty(tmpObject, g_key_property_name)
 	if (length(n) < 1) {
 		# Try for alternative names
 		n = getObjectAltName(tmpObject)
@@ -432,9 +453,11 @@ function getObjectName(tmpObject, s, n)
 #
 function getObjectProperty(tmpObject, tmpPropertyKey, s)
 {
-	s = "This property does not exist !"
-	if (g_config[tmpPropertyKey] in tmpObject) {
-		s = tmpObject[g_config[tmpPropertyKey]]
+	s = ""
+	if (tmpPropertyKey in g_config) {
+		if (g_config[tmpPropertyKey] in tmpObject) {
+			s = tmpObject[g_config[tmpPropertyKey]]
+		}
 	}
 	return s
 }
@@ -446,7 +469,7 @@ function getObjectProperty(tmpObject, tmpPropertyKey, s)
 #
 function getObjectSpecialization(tmpObject, s)
 {
-	s = tmpObject[g_config[g_key_property_type]]
+	s = getObjectProperty(tmpObject, g_key_property_type)
 	return s
 }
 
@@ -502,7 +525,7 @@ function newObjectID(r)
 #
 function parameterSeparator(tmpLine, i, s)
 {
-	s = "There is no separator found here."
+	s = ""
 	if (tmpLine ~ / sep=./) {
 		# find the separator
 		i = index(tmpLine, "=")
@@ -555,9 +578,9 @@ function parameterSplit(tmpObject, tmpAttribute, tmpLine, s, i, j, c, p, v, t, k
 		if (length(p[j]) > 0) {
 			i = split(p[j], v, g_config[g_key_separator_namevalue])
 			if (i > 1) {
-				tmpObject[t v[1]] = v[2]
+				setObjectPropertyRaw(tmpObject, t v[1], v[2])
 			} else {
-				tmpObject[t k++] = p[j]
+				setObjectPropertyRaw(tmpObject, t k++, p[j])
 			}
 		}
 	}
@@ -716,12 +739,25 @@ function sanitize(e, j, k)
 }
 
 ##
-# @brief get object property
-#
+# @brief set object property
 #
 function setObjectProperty(tmpObject, tmpPropertyKey, tmpValue)
 {
-	tmpObject[g_config[tmpPropertyKey]] = tmpValue
+	# do not set empty values
+	if (length(tmpValue) > 0 && tmpPropertyKey in g_config) {
+		tmpObject[g_config[tmpPropertyKey]] = tmpValue
+	}
+}
+
+##
+# @brief set object property raw
+#
+function setObjectPropertyRaw(tmpObject, tmpPropertyRaw, tmpValue)
+{
+	# do not set empty values
+	if (length(tmpValue) > 0 && length(tmpPropertyRaw) > 0) {
+		tmpObject[tmpPropertyRaw] = tmpValue
+	}
 }
 
 ##
