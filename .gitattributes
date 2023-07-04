@@ -1,0 +1,4 @@
+*.bat	text	eol=crlf
+*.sh	text	eol=lf
+*.awk	text	eol=crlf
+*.ini	text	eol=crlf

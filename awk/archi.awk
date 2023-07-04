@@ -1,7 +1,12 @@
 #!/usr/bin/awk
+# Get data for model
 # /usr/sap/hostctrl/exe/saphostctrl -function GetCIMObject -enuminstances SAPInstance
-# /usr/sap/hostctrl/exe/saphostctrl -function ListDatabaseSystems
+# --> /usr/sap/hostctrl/exe/sapcontrol -nr <SystemNumber> -format script -function GetVersionInfo
+# --> /usr/sap/hostctrl/exe/sapcontrol -nr <SystemNumber> -format script -function ParameterValue
+# --> /usr/sap/hostctrl/exe/sapcontrol -nr <SystemNumber> -format script -function J2EEGetComponentList
+# --> /usr/sap/hostctrl/exe/sapcontrol -nr <SystemNumber> -format script -function ABAPGetComponentList
 # /usr/sap/hostctrl/exe/saphostctrl -function GetCIMObject -enuminstances SAP_ITSAMDatabaseSystem
+# /usr/sap/hostctrl/exe/saphostctrl -function GetComputerSystem -sapitsam -swpackages -swpatches
 # _elements.csv
 # "ID","Type","Name","Documentation","Specialization"
 # _properties.csv
@@ -12,11 +17,12 @@ BEGIN {
 	# global object counters
 	COUNTER_cpu = 0
 	COUNTER_networkport = 0
-	COUNTER_eid = -1
+	# identifiers handed out
+	COUNTER_eid = 0
+	# entries processed from file
+	COUNTER_obj = 0
 	# global variable holding the currently processed object
 	PROCESSING = "Unknown"
-	# field separator
-	FS = ","
 	# config array key for the ID string template
 	# the template itself is defined in the ini file
 	# [global]
@@ -45,8 +51,10 @@ BEGIN {
 	KEY_property_SID = "property|sid"
 	KEY_property_DeviceID = "property|deviceid"
 	KEY_property_instance_type = "property|instance_type"
+	KEY_property_instance_name = "property|instance_name"
 	KEY_property_altName = "property|altname"
 	KEY_property_parent = "property|parentid"
+	KEY_property_component = "property|component"
 	# mapping CreationClassName to Archimate
 	KEY_specialization = "specialization|"
 	KEY_specialization_default = "specialization|default"
@@ -81,8 +89,8 @@ BEGIN {
 		ARCHI_DEBUG = DEBUG
 	}
 	# Define relationship direction
-	DIRECTION[0]="FROM"
-	DIRECTION[1]="TO"
+	DIRECTION[0] = "FROM"
+	DIRECTION[1] = "TO"
 	# reset configuration array
 	split("", CONFIG, FS)
 	# reset object array
@@ -91,8 +99,15 @@ BEGIN {
 	split("", DUPLICATE, FS)
 	# reset printed objects
 	split("", PRINTED, FS)
-
-	diagMsg(D_DBUG,"PROGRAM START")
+	# Last known name for a given CreationClassName
+	split("", LASTNAME, FS)
+	# Virtual host list
+	split("", SAPVIRTHOST, FS)
+	# SAP Instance
+	split("", SAPINSTANCE, FS)
+	# SAP Kernel
+	split("", SAPKERNEL, FS)
+	diagMsg(D_DBUG, "PROGRAM START")
 }
 
 ##
@@ -159,6 +174,14 @@ FNR == 5 {
 	# initialize file local variables
 	l_previous_type = "N/A"
 	l_previous_name = "N/A"
+	# reset object counter
+	COUNTER_obj = 0
+	# flush the last object from previous file
+	if (alen(OBJECT) > 0) {
+		processObject()
+	}
+	# reset the object
+	split("", OBJECT, FS)
 	next
 }
 
@@ -169,160 +192,88 @@ FNR < 7 {
 	next
 }
 
-##
-# @brief Process CIM formatted output
-#
-# *********************************************************
-# CreationClassName , String , SAPInstance 
-# SID , String , ABC 
-# SystemNumber , String , 00 
-# InstanceName , String , ASCS00 
-# InstanceType , String , Central Services Instance 
-# Hostname , String , testserver 
-# FullQualifiedHostname , String , TESTSERVER 
-# IPAddress , String , 10.20.30.40 
-# Features , String[] sep=| , MESSAGESERVER|ENQUE 
-# SapVersionInfo , String , 123, patch 456, changelist 7890123
-# 
-/^\*/ && CONFIG[KEY_global_function] ~ CONFIG[KEY_format_cim] {
-	diagArray(D_INFO, OBJECT, "OBJECT")
-	if (COUNTER_eid > -1) {
-		diagMsg(D_INFO, "=============================================================")
-		diagMsg(D_INFO, sprintf("Processing class: %s", PROCESSING))
-		diagMsg(D_INFO, "=============================================================")
-		# do not reset specific objects
-		if (PROCESSING !~ CONFIG[KEY_global_merge]) {
-			# save object to output
-			regObject(OBJECT)
-			# save the name of the object if its type is different
-			# from it's predecessors type.
-			diagMsg(D_INFO, sprintf("before Previous type: %s", l_previous_type))
-			diagMsg(D_INFO, sprintf("before Now type: %s", getObjectType(OBJECT)))
-			diagMsg(D_INFO, sprintf("before Previous name: %s", l_previous_name))
-			if (l_previous_name == getObjectName(OBJECT)) {
-				l_previous_name = getObjectProperty(OBJECT, KEY_prevname)
-			} else {
-				l_previous_name = getObjectName(OBJECT)
-			}
-			l_previous_type = getObjectType(OBJECT)
-			diagMsg(D_INFO, sprintf("after Previous type: %s", l_previous_type))
-			diagMsg(D_INFO, sprintf("after Now type: %s", getObjectType(OBJECT)))
-			diagMsg(D_INFO, sprintf("after Previous name: %s", l_previous_name))
-			diagMsg(D_INFO, ">>> RESET - OBJECT - RESET <<<")
-			# reset the object
-			split("", OBJECT, FS)
-			# restore the saved name of the previous object
-			setObjectProperty(OBJECT, KEY_prevname, l_previous_name)
-		} else {
-			diagMsg(D_INFO, sprintf("Merging %s/%s with upcoming object.", getObjectProperty(OBJECT, KEY_property_type), getObjectName(OBJECT)))
-			diagArray(D_INFO, OBJECT, "OBJECT")
-		}
-		diagMsg(D_INFO, "=============================================================")
-	} else {
-		COUNTER_eid++
-	}
-	next
+$1 > COUNTER_obj {
+	processObject()
+	COUNTER_obj++
 }
 
-! /^[[:blank:]]*$/ && CONFIG[KEY_global_function] ~ CONFIG[KEY_format_cim] {
+{
 	diagMsg(D_INFO, sprintf("(processing) %s", $0))
-	# check for separator
-	l_propsep = parameterSeparator($0)
-	if (length(l_propsep) == 1) {
-		$2 = sprintf("String[] sep=%1s", l_propsep)
-	}
-	# special case when comma is also the properties separator
-	if (NF > 3) {
-		v = $3
-		for (j = 4; j <= NF; j++) {
-			v = v "," $j
-		}
-		gsub(/[[:blank:]]+,/, ",", v)
-		gsub(/,[[:blank:]]+/, ",", v)
-		$3 = v
-	}
-	# special case with a omitted delimiter
-	for (j in CONFIG) {
-		if (KEY_splitter ~ j) {
-			k = substr(j, length(j), 1)
-			if ($1 ~ CONFIG[j]) {
-				l_propsep = k
-				$2 = sprintf("String[] sep=%1s", l_propsep)
-				diagMsg(D_INFO, sprintf("(%s/%s) %s --> %s", CONFIG[j], j, $1, $3))
-			}
-		}
-	}
-	# special case with tennat databases
-	if ($1 ~ /SystemDB DBCredentials/) {
-		$1 = "DBCredentials"
-		diagMsg(D_INFO, sprintf("(SystemDB DBCredentials) %s --> %s", $1, $3))
-	}
-	# special case SapVersionInfo
-	if ($1 ~ /SapVersionInfo/) {
+	gsub(/&nbsp;/, " ", $2)
+	gsub(/:/, "", $2)
+	gsub(/&nbsp;/, " ", $3)
+	diagMsg(D_INFO, sprintf("(processing) %s: %s", $2, $3))
+	# special cases for attribute mapping
+	if ($2 ~ /SystemDB DBCredentials/) {
+		# tennat databases
+		$2 = "DBCredentials"
+		diagMsg(D_INFO, sprintf("%s --> %s", $2, $3))
+	} else if ($2 ~ /SapVersionInfo/) {
+		# SapVersionInfo
 		v = "version " removeBlankStartAndEnd($3)
+		gsub(/,[[:blank:]]+/, ",", v)
 		gsub(/[[:blank:]]+/, CONFIG[KEY_separator_namevalue], v)
-		diagMsg(D_INFO, sprintf("(SapVersionInfo) %s --> %s", $1, $3))
+		diagMsg(D_INFO, sprintf("%s --> %s", $2, $3))
 		$3 = v
-	}
-	# special case DBCredentials
-	if ($1 ~ /DBCredentials/) {
+	} else if ($2 ~ /DBCredentials/) {
+		# DBCredentials
 		v = "Name=" removeBlankStartAndEnd($3)
-		gsub(/Osuser=/,"",v)
-		diagMsg(D_INFO, sprintf("(DBCredentials) %s --> %s", $1, $3))
+		gsub(/Osuser=/, "", v)
+		diagMsg(D_INFO, sprintf("%s --> %s", $2, $3))
 		$3 = v
 	}
 	# this is the proper case
-	$1 = removeBlankStartAndEnd($1)
 	$2 = removeBlankStartAndEnd($2)
 	$3 = removeBlankStartAndEnd($3)
-	if (length(l_propsep) == 1) {
-		if ($1 ~ CONFIG[KEY_global_multiply]) {
-			# specialization
-			l_parent_type = getObjectSpecialization(OBJECT)
-			# check if the object should be skipped
-			if (l_parent_type !~ CONFIG[KEY_global_ignore]) {
-				# create a new object from attribute
-				split("", n_object, FS)
-				l_parent_id = getObjectID(OBJECT)
-				setObjectProperty(n_object, KEY_property_parent, l_parent_id)
-				setObjectProperty(n_object, KEY_property_type, sprintf("SAP_ITSAM%s", $1))
-				setObjectPropertyRaw(n_object, "CSCreationClassName", getObjectProperty(OBJECT, KEY_property_type))
-				setObjectPropertyRaw(n_object, "CSName", getObjectName(OBJECT))
-				parameterSplit(n_object, "", $3, l_propsep)
-				diagArray(D_INFO, n_object, "n_object")
-				regObject(n_object)
-				split("", n_object, FS)
-			}
-		} else {
-			# add as properties only
-			parameterSplit(OBJECT, $1 CONFIG[KEY_separator_propertyname], $3, l_propsep)
+	if ($2 ~ CONFIG[KEY_global_multiply]) {
+		# specialization
+		l_parent_type = getObjectSpecialization(OBJECT)
+		# check if the object should be skipped
+		if (l_parent_type !~ CONFIG[KEY_global_ignore]) {
+			# create a new object from attribute
+			split("", n_object, FS)
+			l_parent_id = getObjectID(OBJECT)
+			setObjectProperty(n_object, KEY_property_parent, l_parent_id)
+			setObjectProperty(n_object, KEY_property_type, sprintf("SAP_ITSAM%s", $2))
+			setObjectPropertyRaw(n_object, "CSCreationClassName", getObjectProperty(OBJECT, KEY_property_type))
+			setObjectPropertyRaw(n_object, "CSName", getObjectName(OBJECT))
+			parameterSplit(n_object, "", $3, ";")
+			diagArray(D_INFO, n_object, "n_object")
+			regObject(n_object)
+			split("", n_object, FS)
 		}
 	} else {
 		# do not overwrite existing attributes
-		if (length(OBJECT[$1]) < 1) {
-			OBJECT[$1] = $3
-			diagMsg(D_INFO, sprintf("(adding) %s = %s", $1, $3))
+		if (length(OBJECT[$2]) < 1) {
+			OBJECT[$2] = $3
+			diagMsg(D_INFO, sprintf("(adding) %s = %s", $2, $3))
 		}
 	}
-	# every CIM oject must have a CreationClassName
-	if ($1 ~ /CreationClassName/) {
+	# every CIM object must have a CreationClassName
+	if ($2 ~ /CreationClassName/) {
 		PROCESSING = $3
 	}
-	next
 }
 
 END {
 	# flush objects 
-	if (CONFIG[KEY_global_function] ~ CONFIG[KEY_format_cim]) {
-		diagArray(D_INFO, OBJECT, "OBJECT")
-		diagMsg(D_INFO, "=== END =====================================================")
+	diagArray(D_INFO, OBJECT, "OBJECT")
+	diagMsg(D_INFO, "=== END =====================================================")
+	processObject()
+	if ("CreationClassName" in OBJECT) {
+		# the last object wanted to merge and there was nothing to merge with
 		regObject(OBJECT)
-		diagMsg(D_INFO, "=== END =====================================================")
-		split("", OBJECT, FS)
 	}
+	for (k in PRINTED) {
+		if (PRINTED[k] == 0) {
+			printELEMENT(k, "Gap", "Unknown", "This element was not defined in the model", "")
+		}
+	}
+	diagMsg(D_INFO, "=== END =====================================================")
+	split("", OBJECT, FS)
 	diagArray(D_INFO, CONFIG, "CONFIG")
 	diagArray(D_INFO, DUPLICATE, "DUPLICATE")
-	diagMsg(D_DBUG,"PROGRAM END")
+	diagMsg(D_DBUG, "PROGRAM END")
 }
 
 
@@ -419,7 +370,7 @@ function getObjectAttribute(tmpObject, tmpList, s, k, j, l, r)
 #
 function getObjectID(tmpObject, k, e, s, n)
 {
-	if ( length(k) < 1 ) {
+	if (length(k) < 1) {
 		s = getObjectSpecialization(tmpObject)
 		n = getObjectName(tmpObject)
 		k = sprintf("%s|%s", s, n)
@@ -448,7 +399,7 @@ function getObjectName(tmpObject, s, n)
 		# Try for alternative names
 		n = getObjectAltName(tmpObject)
 		if (s ~ /SAPInstance/) {
-			n = sprintf("%s %s", tmpObject[CONFIG[KEY_property_SID]], tmpObject[CONFIG[KEY_property_instance_type]])
+			n = sprintf("%s %s", tmpObject[CONFIG[KEY_property_SID]], tmpObject[CONFIG[KEY_property_instance_name]])
 		} else if (s ~ /SAP_ITSAMProcessor/) {
 			if (length(tmpObject[CONFIG[KEY_property_DeviceID]]) > 0) {
 				n = sprintf("%s", tmpObject[CONFIG[KEY_property_DeviceID]])
@@ -463,10 +414,16 @@ function getObjectName(tmpObject, s, n)
 			}
 		} else if (s ~ /SAP_ITSAMConnectAddress/) {
 			n = sprintf("%s:%s", tmpObject["Host"], tmpObject["Port"])
+		} else if (s ~ /SAP_ITSAMDatabaseComponent/) {
+			n = sprintf("%s %s", LASTNAME["SAP_ITSAMDatabaseInstance"], n)
+			# Connect component to its Instance
+			tmpObject["CSCreationClassName"] = "SAP_ITSAMDatabaseInstance"
+			tmpObject["CSName"] = LASTNAME["SAP_ITSAMDatabaseInstance"]
+		} else if (s ~ /SAP_ITSAMSAPSoftwarePackage/) {
+			n = sprintf("%s %s %s", tmpObject[CONFIG[KEY_property_SID]], tmpObject[CONFIG[KEY_property_instance_name]], tmpObject["Filename"])
 		}
-	} else {
-		n = replaceBlankAll(n, CONFIG[KEY_separator_namewords])
-	}
+	} 
+	n = replaceBlankAll(n, CONFIG[KEY_separator_namewords])
 	return n
 }
 
@@ -508,6 +465,7 @@ function getObjectType(tmpObject, s, t)
 	t = CONFIG["specialization|" s]
 	if (length(t) < 1) {
 		t = CONFIG[KEY_specialization_default]
+		diagMsg(D_WARN, sprintf("Specialization %s --> %s", s, t))
 	}
 	return t
 }
@@ -518,7 +476,7 @@ function getObjectType(tmpObject, s, t)
 function isUnique(tmpObject, k, s, n, r)
 {
 	r = 1
-	if ( length(k) < 1 ) {
+	if (length(k) < 1) {
 		s = getObjectSpecialization(tmpObject)
 		n = getObjectName(tmpObject)
 		k = sprintf("%s|%s", s, n)
@@ -533,12 +491,14 @@ function isUnique(tmpObject, k, s, n, r)
 # @brief return object id
 #
 # This function will construct a id for
-# the archimate object.
+# the archimate object. Also it will set
+# the flag that the object was not printed.
 #
 function newObjectID(r)
 {
 	r = sprintf(CONFIG[KEY_global_prefix], COUNTER_eid++)
 	diagMsg(D_INFO, sprintf("eID=%s", r))
+	PRINTED[r] = 0
 	return r
 }
 
@@ -623,6 +583,7 @@ function printELEMENT(eID, eType, eName, eDocumentation, eSpecialization, m)
 	eDocumentation = sanitize(eDocumentation)
 	eSpecialization = sanitize(eSpecialization)
 	m = sprintf("\"%s\",\"%s\",\"%s\",\"%s\",\"%s\"\n", eID, eType, eName, eDocumentation, eSpecialization)
+	PRINTED[eID] = 1
 	stdMsg(CONFIG[KEY_global_felements], m)
 }
 
@@ -635,6 +596,9 @@ function printObject(tmpObject, e, t, n, d, s, k, r, re, pe, rd)
 	t = getObjectType(tmpObject)
 	# determine the object name
 	n = getObjectName(tmpObject)
+	# save data for Later use
+	LASTNAME[tmpObject["CreationClassName"]] = n
+	diagMsg(D_DBUG, sprintf("LASTNAME[\"%s\"]=\"%s\"", tmpObject["CreationClassName"], n))
 	# determine documentation
 	d = getObjectProperty(tmpObject, KEY_property_documentation)
 	if (length(d) < 1) {
@@ -646,11 +610,13 @@ function printObject(tmpObject, e, t, n, d, s, k, r, re, pe, rd)
 	printELEMENT(e, t, n, d, s)
 	# print properties
 	for (k in tmpObject) {
-		printPROPERTY(e, k, tmpObject[k])
+		if (k !~ /ParentID/) {
+			printPROPERTY(e, k, tmpObject[k])
+		}
 	}
 	# print relations
 	for (r in CONFIG) {
-		if ( r ~ KEY_relation ) {
+		if (r ~ KEY_relation) {
 			# 1,CompositionRelationship,SystemCreationClassName,SystemName
 			split(CONFIG[r], rd, ",")
 			pc = tmpObject[rd[3]]
@@ -675,7 +641,6 @@ function printObject(tmpObject, e, t, n, d, s, k, r, re, pe, rd)
 			}
 		}
 	}
-	PRINTED[e]=1
 }
 
 ##
@@ -706,7 +671,104 @@ function printRELATION(eID, eType, eName, eDocumentation, eSource, eTarget, eSpe
 	eTarget = sanitize(eTarget)
 	eSpecialization = sanitize(eSpecialization)
 	m = sprintf("\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\",\"%s\"\n", eID, eType, eName, eDocumentation, eSource, eTarget, eSpecialization)
+	PRINTED[eID] = 1
 	stdMsg(CONFIG[KEY_global_frelations], m)
+}
+
+function processObject()
+{
+	diagMsg(D_INFO, "=============================================================")
+	diagMsg(D_INFO, sprintf("Processing class: %s", PROCESSING))
+	diagMsg(D_INFO, "=============================================================")
+	diagArray(D_INFO, OBJECT, "OBJECT")
+	# do not reset specific objects
+	if (PROCESSING !~ CONFIG[KEY_global_merge]) {
+		# add artificial objects for specific object types
+		if (PROCESSING ~ /SAPInstance/) {
+			split("", n_object, FS)
+			n_name = sprintf("%3s", OBJECT[CONFIG[KEY_property_SID]])
+			p_name = ""
+			# creates the sap system as a collaboration of application components
+			if ((n_name in SAPINSTANCE) == 0) {
+				setObjectProperty(n_object, KEY_property_type, "SAP_ITSAMSAPSystem")
+				setObjectProperty(n_object, KEY_property_name, n_name)
+				diagArray(D_INFO, n_object, "n_object")
+				# register the sap system in the global array so other object can link to it
+				setObjectPropertyRaw(SAPINSTANCE, n_name, regObject(n_object))
+				split("", n_object, FS)
+			}
+			# create the node vith virtual host
+			n_name = sprintf("%s", OBJECT["Hostname"])
+			p_name = sprintf("%s", OBJECT["FullQualifiedHostname"])
+			if ((n_name in SAPVIRTHOST) == 0) {
+				setObjectProperty(n_object, KEY_property_type, sprintf("SAP_ITSAMSAPVirtualHost"))
+				setObjectProperty(n_object, KEY_property_name, n_name)
+				setObjectPropertyRaw(n_object, "CSCreationClassName", "SAP_ITSAMVirtualComputerSystem")
+				setObjectPropertyRaw(n_object, "CSName", p_name)
+				diagArray(D_INFO, n_object, "n_object")
+				setObjectPropertyRaw(SAPVIRTHOST, n_name, regObject(n_object))
+				split("", n_object, FS)
+			}
+			# connect sapinstance to sap system
+			p_name = sprintf("%s", sprintf("%3s", OBJECT[CONFIG[KEY_property_SID]]))
+			setObjectPropertyRaw(OBJECT, "CSCreationClassName", "SAP_ITSAMSAPSystem")
+			setObjectPropertyRaw(OBJECT, "CSName", p_name)
+		} else if (PROCESSING ~ /SAP_ITSAMVirtualComputerSystem/) {
+			p_name = sprintf("%3s", OBJECT[CONFIG[KEY_property_SID]])
+			setObjectPropertyRaw(OBJECT, "CSCreationClassName", "SAP_ITSAMSAPSystem")
+			setObjectPropertyRaw(OBJECT, "CSName", p_name)
+		} else if (PROCESSING ~ /SAP_ITSAMSAPSoftwarePackage/) {
+			split("", n_object, FS)
+			n_name = sprintf("%s_%s", OBJECT[CONFIG[KEY_property_SID]], OBJECT[CONFIG[KEY_property_instance_name]])
+			p_name = sprintf("%s_%s", OBJECT[CONFIG[KEY_property_SID]], OBJECT[CONFIG[KEY_property_instance_name]])
+			# create the Kernel
+			if ((n_name in SAPKERNEL) == 0) {
+				setObjectProperty(n_object, KEY_property_type, sprintf("SAP_ITSAMSAPKernel"))
+				setObjectProperty(n_object, KEY_property_name, n_name)
+				setObjectPropertyRaw(n_object, "CSCreationClassName", "SAPInstance")
+				setObjectPropertyRaw(n_object, "CSName", p_name)
+				# copy kernel properties
+				setObjectPropertyRaw(n_object, "changelist", OBJECT["changelist"])
+				setObjectPropertyRaw(n_object, "patch", OBJECT["patch"])
+				setObjectPropertyRaw(n_object, "Platform", OBJECT["Platform"])
+				setObjectPropertyRaw(n_object, "ProductVersion", OBJECT["ProductVersion"])
+				setObjectPropertyRaw(n_object, "RKScompatibilitylevel", OBJECT["RKScompatibilitylevel"])
+				setObjectPropertyRaw(n_object, "SpecialBuildDescription", OBJECT["SpecialBuildDescription"])
+				setObjectPropertyRaw(n_object, "Time", OBJECT["Time"])
+				#Create object
+				diagArray(D_INFO, n_object, "n_object")
+				setObjectPropertyRaw(SAPKERNEL, n_name, regObject(n_object))
+				split("", n_object, FS)
+			}
+			setObjectPropertyRaw(OBJECT, "CSCreationClassName", "SAP_ITSAMSAPKernel")
+			setObjectPropertyRaw(OBJECT, "CSName", n_name)
+		}
+		# save the name of the object if its type is different
+		# from it's predecessors type.
+		diagMsg(D_INFO, sprintf("before Previous type: %s", l_previous_type))
+		diagMsg(D_INFO, sprintf("before Now type: %s", getObjectType(OBJECT)))
+		diagMsg(D_INFO, sprintf("before Previous name: %s", l_previous_name))
+		if (l_previous_name == getObjectName(OBJECT)) {
+			l_previous_name = getObjectProperty(OBJECT, KEY_prevname)
+		} else {
+			l_previous_name = getObjectName(OBJECT)
+		}
+		l_previous_type = getObjectType(OBJECT)
+		diagMsg(D_INFO, sprintf("after Previous type: %s", l_previous_type))
+		diagMsg(D_INFO, sprintf("after Now type: %s", getObjectType(OBJECT)))
+		diagMsg(D_INFO, sprintf("after Previous name: %s", l_previous_name))
+		diagMsg(D_INFO, ">>> WRITE - OBJECT - WRITE <<<")
+		regObject(OBJECT)
+		diagMsg(D_INFO, ">>> RESET - OBJECT - RESET <<<")
+		# reset the object
+		split("", OBJECT, FS)
+		# restore the saved name of the previous object
+		setObjectProperty(OBJECT, KEY_prevname, l_previous_name)
+	} else {
+		diagMsg(D_INFO, sprintf("Merging %s/%s with upcoming object.", getObjectProperty(OBJECT, KEY_property_type), getObjectName(OBJECT)))
+		diagArray(D_INFO, OBJECT, "OBJECT")
+	}
+	diagMsg(D_INFO, "=============================================================")
 }
 
 ##
@@ -725,10 +787,13 @@ function regObject(tmpObject, e)
 			e = getObjectID(tmpObject)
 		}
 		# print the object
-		if ( e in PRINTED == 0 ) {
+		if (PRINTED[e] == 0) {
 			printObject(tmpObject, e)
 		}
+	} else {
+		e = 0
 	}
+	return e
 }
 
 ##
@@ -800,7 +865,7 @@ function setObjectProperty(tmpObject, tmpPropertyKey, tmpValue)
 {
 	# do not set empty values
 	if (length(tmpValue) > 0 && tmpPropertyKey in CONFIG) {
-		tmpObject[CONFIG[tmpPropertyKey]] = tmpValue
+		setObjectPropertyRaw(tmpObject, CONFIG[tmpPropertyKey], tmpValue)
 	}
 }
 
