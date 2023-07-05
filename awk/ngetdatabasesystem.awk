@@ -1,11 +1,21 @@
 #!/usr/bin/awk
 BEGIN {
 	FS = ","
+	hostname="localhost"
+	if (length(h)>0) {
+		hostname=h
+	}
 	c = -1
 }
 
 FNR == 3 {
-	print $0 " " p00
+	srand()
+	e = srand()
+	# print epoch time
+	print e
+	# print hostname
+	print hostname
+	print $0
 	next
 }
 
