@@ -23,7 +23,7 @@ REM
 FOR /F "usebackq tokens=1,2* delims==" %%G IN ("%_filename%.tmp") DO (
 	SET _dblq=%%H
 	SET _dblq=!_dblq:"=""!
-	CALL "%SCRIPTPATH%setindirect.bat" "svc_%%G" "!_dblq!"
+	CALL :function_setindirect "svc_%%G" "!_dblq!"
 	IF "%%G"=="WaitHint" (
 		CALL :function_sapj2ee_checkcomponent
 	)
@@ -43,4 +43,11 @@ SET "_batchconfig=%sapj2ee_dir%\j2ee\configtool\batchconfig.bat"
 IF EXIST "%_batchconfig%" (
 		CALL "%_batchconfig%" -task get.versions.of.deployed.units
 )
+EXIT /B
+
+:function_setindirect
+SET "_varNam=%~1"
+SET "_varVal=%~2"
+SET "_varVal=%_varVal:""="%"
+SET "%_varNam%=%_varVal%"
 EXIT /B

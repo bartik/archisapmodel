@@ -19,7 +19,7 @@ FNR == 3 {
 	next
 }
 
-FNR < 7 {
+FNR < 5 {
 	print $0
 	next
 }

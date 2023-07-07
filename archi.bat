@@ -170,15 +170,20 @@ CD "!_arg_procdir!" || GOTO :skip_normalize
 
 REM Normalize raw files
 IF "!_arg_debug!"=="on" ECHO Normalize raw files
-awk -f "!_arg_awk!ngetcomputersystem.awk" "!_arg_datadir!getcomputersystem_!_arg_ext!.raw">"!_arg_procdir!getcomputersystem_!_arg_ext!.log"
-awk -f "!_arg_awk!ngetdatabasesystem.awk" "!_arg_datadir!getdatabasesystem_!_arg_ext!.raw">"!_arg_procdir!getdatabasesystem_!_arg_ext!.log"
-awk -f "!_arg_awk!nlistsap.awk" "!_arg_datadir!listsap_!_arg_ext!.raw">"!_arg_procdir!listsap_!_arg_ext!.log"
+awk -vh="%COMPUTERNAME%" -f "!_arg_awk!ngetcomputersystem.awk" "!_arg_datadir!getcomputersystem_!_arg_ext!.raw">"!_arg_procdir!getcomputersystem_!_arg_ext!.log"
+awk -vh="%COMPUTERNAME%" -f "!_arg_awk!ngetdatabasesystem.awk" "!_arg_datadir!getdatabasesystem_!_arg_ext!.raw">"!_arg_procdir!getdatabasesystem_!_arg_ext!.log"
+awk -vh="%COMPUTERNAME%" -f "!_arg_awk!nlistsap.awk" "!_arg_datadir!listsap_!_arg_ext!.raw">"!_arg_procdir!listsap_!_arg_ext!.log"
 FOR /F "tokens=5" %%A IN ('FINDSTR /C:InstanceName "!_arg_datadir!listsap_!_arg_ext!.raw"') DO (
 	SET "NR=%%A"
+	SET "TT=!NR:~0,1!"
 	SET "NR=!NR:~-2!"
-	awk -f "!_arg_awk!ngetversioninfo.awk" "!_arg_datadir!getversioninfo_!NR!_!_arg_ext!.raw">"!_arg_datadir!getversioninfo_!NR!_!_arg_ext!.log"
-	awk -f "!_arg_awk!nparametervalue.awk" "!_arg_datadir!parametervalue_!NR!_!_arg_ext!.raw >"!_arg_datadir!parametervalue_!NR!_!_arg_ext!.log"
-	awk -f "!_arg_awk!ngetcomponentlist.awk" "!_arg_datadir!getcomponentlist_!NR!_!_arg_ext!.raw">"!_arg_datadir!getcomponentlist_!NR!_!_arg_ext!.log"
+	awk -vn="!NR!" -vh="%COMPUTERNAME%" -f "!_arg_awk!ngetversioninfo.awk" "!_arg_datadir!getversioninfo_!NR!_!_arg_ext!.raw">"!_arg_datadir!getversioninfo_!NR!_!_arg_ext!.log"
+	awk -vn="!NR!" -vh="%COMPUTERNAME%" -f "!_arg_awk!nparametervalue.awk" "!_arg_datadir!parametervalue_!NR!_!_arg_ext!.raw >"!_arg_datadir!parametervalue_!NR!_!_arg_ext!.log"
+	IF "%TT%"=="J" (
+		awk -vn="!NR!" -vh="%COMPUTERNAME%" -f "!_arg_awk!ngetcomponentlist.awk" "!_arg_datadir!getcomponentlist_!NR!_!_arg_ext!.raw">"!_arg_datadir!getcomponentlist_!NR!_!_arg_ext!.log"
+	) ELSE IF "%TT%"=="D" (
+		awk -vn="!NR!" -vh="%COMPUTERNAME%" -f "!_arg_awk!ngetcomponentlist.awk" "!_arg_datadir!getcomponentlist_!NR!_!_arg_ext!.raw">"!_arg_datadir!getcomponentlist_!NR!_!_arg_ext!.log"
+	)
 )
 :skip_normalize
 
@@ -239,8 +244,26 @@ CALL %SCRIPTPATH%J2EEGetComponentList2.bat %~1>>%2
 EXIT /B 0
 
 :function_header
+REM Determine date
+REM Day  Hour  Minute  Month  Second  Year
+REM 6    21    18      7      14      2099
+FOR /F "skip=1 delims=" %%F IN ('wmic PATH Win32_LocalTime GET Day^,Month^,Year,Hour,Minute,Second /FORMAT:TABLE') DO (
+	FOR /F "tokens=1-3" %%L in ("%%F") do (
+		SET _cdd=0%%L
+		SET _cHH=0%%M
+		SET _cMM=0%%N
+		SET _cmm=0%%O
+		SET _cSS=0%%P
+		SET _cyy=%%Q
+	)
+)
+SET _cdd=%_cdd:~-2%
+SET _cmm=%_cmm:~-2%
+SET _cHH=%_cHH:~-2%
+SET _cMM=%_cMM:~-2%
+SET _cSS=%_cSS:~-2%
 ECHO(
-ECHO 2023-06-18 19:55:16
+ECHO %_cdd%.%_cmm%.%_cyy% %_cHH%:%_cMM%:%_cSS%
 ECHO %~1
 ECHO OK
 EXIT /B 0
@@ -279,4 +302,3 @@ FOR /F "tokens=*" %%A IN ('FINDSTR /B /C:"%~3: " "!_arg_procdir!archi.out"') DO 
 	ECHO !LOUT!>>"!_arg_procdir!!_arg_csv!_%1.csv"
 )
 EXIT /B 0
-

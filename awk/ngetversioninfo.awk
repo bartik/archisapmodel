@@ -4,6 +4,10 @@ BEGIN {
 	if (length(h)>0) {
 		hostname=h
 	}
+	n=0
+	if (length(n)>0) {
+		instance=n
+	}
 }
 
 FNR == 3 {
@@ -13,6 +17,11 @@ FNR == 3 {
 	print e
 	# print hostname
 	print hostname
+	print $0 " " instance
+	next
+}
+
+FNR < 5 {
 	print $0
 	next
 }
