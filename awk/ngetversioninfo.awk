@@ -1,13 +1,6 @@
 #!/usr/bin/awk
 BEGIN {
-	hostname="localhost"
-	if (length(h)>0) {
-		hostname=h
-	}
-	n=0
-	if (length(n)>0) {
-		instance=n
-	}
+	hostname = "localhost"
 }
 
 FNR == 3 {
@@ -15,13 +8,18 @@ FNR == 3 {
 	e = srand()
 	# print epoch time
 	print e
-	# print hostname
-	print hostname
-	print $0 " " instance
-	next
+	# hostname
+	hostname = $1
 }
 
-FNR < 5 {
+FNR == 4 {
+	# command
+	command = $1
+	# Instance
+	instance = $2
+}
+
+FNR < 6 {
 	print $0
 	next
 }
@@ -71,15 +69,15 @@ $2 ~ /Filename:/ {
 	# Add creation class name
 	print $1 " CreationClassName: SAP_ITSAMSAPSoftwarePackage"
 	# split filename to extract variables
-	s="\\"
-	if ($0~"/") {
-		s="/"
+	s = "\\"
+	if ($0 ~ "/") {
+		s = "/"
 	}
-	l=split($3, p, s)
-	n=p[l]
-	sid=p[4]
-	ina=p[5]
-	syn=ina
+	l = split($3, p, s)
+	n = p[l]
+	sid = p[4]
+	ina = p[5]
+	syn = ina
 	gsub(/[[:alpha:]]/, "", syn)
 	print $1 " Filename: " n
 	print $1 " SID: " sid

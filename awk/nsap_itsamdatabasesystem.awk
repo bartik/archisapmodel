@@ -1,10 +1,6 @@
 #!/usr/bin/awk
 BEGIN {
 	FS = ","
-	hostname="localhost"
-	if (length(h)>0) {
-		hostname=h
-	}
 	c = -1
 }
 
@@ -13,13 +9,18 @@ FNR == 3 {
 	e = srand()
 	# print epoch time
 	print e
-	# print hostname
-	print hostname
-	print $0
-	next
+	# hostname
+	hostname = $1
 }
 
-FNR < 5 {
+FNR == 4 {
+	# command
+	command = $1
+	# Instance
+	instance = $2
+}
+
+FNR < 6 {
 	print $0
 	next
 }
@@ -48,7 +49,7 @@ FNR < 5 {
 	t = removeBlanks(t)
 	v = removeBlanks(v)
 	# set attributes
-  gsub(/[[:blank:]]/, "\\&nbsp;", n)
+	gsub(/[[:blank:]]/, "\\&nbsp;", n)
 	if (t ~ /[[:blank:]]+sep=/) {
 		# get separator
 		w = split(t, u, "=")
@@ -64,12 +65,12 @@ FNR < 5 {
 			gsub(/[[:blank:]]+$/, "", u[j])
 			gsub(/^[[:blank:]]+/, "", u[j])
 			if (length(u[j]) > 0) {
-        gsub(/[[:blank:]]/, "\\&nbsp;", u[j])
+				gsub(/[[:blank:]]/, "\\&nbsp;", u[j])
 				printf "%s %s_%s: %s\n", c, n, j, u[j]
 			}
 		}
 	} else {
-    gsub(/[[:blank:]]/, "\\&nbsp;", v)
+		gsub(/[[:blank:]]/, "\\&nbsp;", v)
 		printf "%s %s: %s\n", c, n, v
 	}
 }

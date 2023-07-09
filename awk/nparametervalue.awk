@@ -1,27 +1,21 @@
 #!/usr/bin/awk
-BEGIN {
-	hostname="localhost"
-	if (length(h)>0) {
-		hostname=h
-	}
-	n=0
-	if (length(n)>0) {
-		instance=n
-	}
-}
-
 FNR == 3 {
 	srand()
 	e = srand()
 	# print epoch time
 	print e
-	# print hostname
-	print hostname
-	print $0 " " instance
-	next
+	# hostname
+	hostname = $1
 }
 
-FNR < 5 {
+FNR == 4 {
+	# command
+	command = $1
+	# Instance
+	instance = $2
+}
+
+FNR < 6 {
 	print $0
 	next
 }
@@ -38,22 +32,28 @@ FNR < 5 {
 }
 
 {
-	l=$0
-	q=l
-	gsub(/^_+/,"",q)
-	k=substr(q,1,3)
-	t=index(q,"=")
-	m=index(q,"_")
-	n=index(q,"/")
-	if (m<t) {
-		if (m>2) k=substr(q,1,m)
+	l = $0
+	gsub(/^0[[:blank:]]+:[[:blank:]]+/, "", l)
+	q = l
+	gsub(/^_+/, "", q)
+	k = substr(q, 1, 3)
+	t = index(q, "=")
+	m = index(q, "_")
+	n = index(q, "/")
+	if (m < t) {
+		if (m > 2) {
+			k = substr(q, 1, m)
+		}
 	}
-	if (n<t){
-		if (n>2) k=substr(q,1,n)
+	if (n < t) {
+		if (n > 2) {
+			k = substr(q, 1, n)
+		}
 	}
 	if (! idx[k]) {
-		idx[k]=i++
+		idx[k] = i++
 	}
-	gsub(/\075/,": ",l)
+	gsub(/\075/, ": ", l)
 	printf "%d %s\n", idx[k], l
 }
+

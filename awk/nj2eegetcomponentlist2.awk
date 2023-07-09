@@ -1,15 +1,7 @@
 #!/usr/bin/awk
 BEGIN {
 	FS = ":"
-  c = -1
-	hostname="localhost"
-	if (length(h)>0) {
-		hostname=h
-	}
-	n=0
-	if (length(n)>0) {
-		instance=n
-	}
+	c = -1
 }
 
 FNR == 3 {
@@ -17,13 +9,18 @@ FNR == 3 {
 	e = srand()
 	# print epoch time
 	print e
-	# print hostname
-	print hostname
-	print $0 " " instance
-	next
+	# hostname
+	hostname = $1
 }
 
-FNR < 5 {
+FNR == 4 {
+	# command
+	command = $1
+	# Instance
+	instance = $2
+}
+
+FNR < 6 {
 	print $0
 	next
 }
@@ -65,13 +62,14 @@ FNR < 12 {
 }
 
 c >= 0 {
-	d="Component"
-	if ( $1 ~ /^[[:blank:]]/ ) {
-		d="Archive"
+	d = "Component"
+	if ($1 ~ /^[[:blank:]]/) {
+		d = "Archive"
 	}
-	gsub(/^[[:blank:]]+/,"",$1)
-	gsub(/[[:blank:]]+$/,"",$1)
-	gsub(/^[[:blank:]]+/,"",$2)
-	gsub(/[[:blank:]]+$/,"",$2)
+	gsub(/^[[:blank:]]+/, "", $1)
+	gsub(/[[:blank:]]+$/, "", $1)
+	gsub(/^[[:blank:]]+/, "", $2)
+	gsub(/[[:blank:]]+$/, "", $2)
 	printf "%d %s: %s %s\n", c, d, $1, $2
 }
+

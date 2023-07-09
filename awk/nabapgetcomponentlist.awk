@@ -1,20 +1,12 @@
 #!/usr/bin/awk
 BEGIN {
-  p = 0
+	p = 0
 	q = 1
-	h[1]="Component"
-	h[2]="Release"
-  h[3]="Patchlevel"
-	h[4]="ComponentType"
-	h[5]="Description"
-	hostname="localhost"
-	if (length(h)>0) {
-		hostname=h
-	}
-	n=0
-	if (length(n)>0) {
-		instance=n
-	}
+	w[1] = "Component"
+	w[2] = "Release"
+	w[3] = "Patchlevel"
+	w[4] = "ComponentType"
+	w[5] = "Description"
 }
 
 FNR == 3 {
@@ -22,13 +14,18 @@ FNR == 3 {
 	e = srand()
 	# print epoch time
 	print e
-	# print hostname
-	print hostname
-	print $0 " " instance
-	next
+	# hostname
+	hostname = $1
 }
 
-FNR < 5 {
+FNR == 4 {
+	# command
+	command = $1
+	# Instance
+	instance = $2
+}
+
+FNR < 6 {
 	print $0
 	next
 }
@@ -38,12 +35,13 @@ FNR < 5 {
 }
 
 $1 > p {
-  q = 1
-  p = $1
+	q = 1
+	p = $1
 }
 
 {
-  r=$0
-  gsub(/:/,h[q++] ":",r)
+	r = $0
+	gsub(/:/, w[q++] ":", r)
 	print r
 }
+
