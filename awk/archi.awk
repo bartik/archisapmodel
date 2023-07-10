@@ -208,20 +208,7 @@ $1 > COUNTER_obj {
 		# tennat databases
 		$2 = "DBCredentials"
 		diagMsg(D_INFO, sprintf("%s --> %s", $2, $3))
-	} else if ($2 ~ /SapVersionInfo/) {
-		# SapVersionInfo
-		v = "version " removeBlankStartAndEnd($3)
-		gsub(/,[[:blank:]]+/, ",", v)
-		gsub(/[[:blank:]]+/, CONFIG[KEY_separator_namevalue], v)
-		diagMsg(D_INFO, sprintf("%s --> %s", $2, $3))
-		$3 = v
-	} else if ($2 ~ /DBCredentials/) {
-		# DBCredentials
-		v = "Name=" removeBlankStartAndEnd($3)
-		gsub(/Osuser=/, "", v)
-		diagMsg(D_INFO, sprintf("%s --> %s", $2, $3))
-		$3 = v
-	}
+	} 
 	# this is the proper case
 	$2 = removeBlankStartAndEnd($2)
 	$3 = removeBlankStartAndEnd($3)
@@ -540,7 +527,7 @@ function parameterSeparator(tmpLine, i, s)
 # Example 2:
 # Line(withoud quotes):
 #			" SapVersionInfo , String , 123, patch 456, changelist 7890123 "
-#			This line has to augumented to be usable with this function
+#			This line has to be augumented to be usable with this function
 #			" SapVersionInfo , String sep=; , version=123;patch=456;changelist=7890123 "
 # Parameters:
 #			tmpAttribute - the prefix of the property = SapVersionInfo

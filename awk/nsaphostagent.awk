@@ -30,19 +30,28 @@ FNR < 6 {
 	next
 }
 
-/^ / && c > -1 {
+/^[[:blank:]]+/ && c > -1 {
 	n = $1
 	t = $2
 	if ($0 ~ /sep=,/) {
 		t = t ","
-		v = $4
+		v = removeBlanks($4)
 		i = 5
 	} else {
-		v = $3
+		v = removeBlanks($3)
 		i = 4
 	}
 	for (j = i; j <= NF; j++) {
-		v = v "," $j
+		v = v "," removeBlanks($j)
+	}
+	# special handling for some attributes
+	if (n ~ /Version/) {
+		t = "String[] sep=,"
+		v = "kernel=" removeBlanks(v)
+		gsub(/[[:blank:]]+PL/, ",patch=", v)
+		gsub(/[[:blank:]]+\[compile[[:blank:]]+time:[[:blank:]]+/, ",compiletime=", v)
+		gsub(/\][[:blank:]]+\[CL[[:blank:]]+/, ",changelist=", v)
+		gsub(/\]$/, "", v)
 	}
 	# strip leading and trailing blanks
 	n = removeBlanks(n)
@@ -65,8 +74,14 @@ FNR < 6 {
 			gsub(/[[:blank:]]+$/, "", u[j])
 			gsub(/^[[:blank:]]+/, "", u[j])
 			if (length(u[j]) > 0) {
-				gsub(/[[:blank:]]/, "\\&nbsp;", u[j])
-				printf "%s %s_%s: %s\n", c, n, j, u[j]
+				if (u[j] ~ /=/) {
+					split(u[j], z, "=")
+					gsub(/[[:blank:]]/, "\\&nbsp;", z[2])
+					printf "%s %s_%s: %s\n", c, n, z[1], z[2]
+				} else {
+					gsub(/[[:blank:]]/, "\\&nbsp;", u[j])
+					printf "%s %s_%s: %s\n", c, n, j, u[j]
+				}
 			}
 		}
 	} else {

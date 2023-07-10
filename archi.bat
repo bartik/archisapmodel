@@ -177,16 +177,10 @@ FOR /F "usebackq" %%i IN (`DIR /B /S "!_arg_datadir!*" ^| FINDSTR "!_arg_ext!\.r
 		)
 		REM create new uni file
 		DEL /Q "!l_logfile!" >NUL 2>&1
-		IF EXIST "!_arg_awk!n!l_function!.awk" (
-			IF "!_arg_debug!"=="on" ECHO Transform !l_function! !l_rawfile!
-			awk -f "!_arg_awk!n!l_function!.awk" "!l_rawfile!" >"!l_logfile!"
-			SET _RC=!ERRORLEVEL!
-		) ELSE (
-			IF "!_arg_debug!"=="on" ECHO Copy !l_function! !l_rawfile!
-			REM This removes unicode encoding
-			awk -f "!_arg_awk!ndefault.awk" "!l_rawfile!" >"!l_logfile!"
-			SET _RC=!ERRORLEVEL!
-		)
+		IF NOT EXIST "!_arg_awk!n!l_function!.awk" SET "l_function=default"
+		IF "!_arg_debug!"=="on" ECHO Transform !l_function! !l_rawfile!
+		awk -f "!_arg_awk!n!l_function!.awk" "!l_rawfile!" >"!l_logfile!"
+		SET _RC=!ERRORLEVEL!
 		REM DEL /Q "!l_rawfile!" >NUL 2>&1
 	) ELSE (
 		SET /A _RC=1
