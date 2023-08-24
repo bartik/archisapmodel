@@ -229,8 +229,8 @@ function print_header() {
 	if [[ "${l_instance}" == "" ]]; then
 		printf '%s\n' "${l_function}"
 	else
-		printf '%s %d\n' "${l_function}" "${l_instance}"
-        fi
+		printf '%s %s\n' "${l_function}" "${l_instance}"
+  fi
 	printf 'OK\n'
 }
 
@@ -436,9 +436,19 @@ if [[ "${_arg_download}" == "on" ]]; then
 		mkdir -p "${_arg_datadir}"
 	fi
 	cd "${_arg_datadir}" && {
-		print_debug "Downloading ifconfig"
-		print_header "ifconfig" >"${_arg_datadir}ifconfig_${_arg_ext}.raw"
-		ifconfig -a >>"${_arg_datadir}ifconfig_${_arg_ext}.raw"
+		if ifconfig -a >/dev/null 2>&1; then
+			print_debug "Downloading ifconfig"
+			print_header "ifconfig" >"${_arg_datadir}ifconfig_${_arg_ext}.raw"
+			ifconfig -a >>"${_arg_datadir}ifconfig_${_arg_ext}.raw"
+		elif /sbin/ifconfig -a >/dev/null 2>&1; then
+			print_debug "Downloading ifconfig"
+			print_header "ifconfig" >"${_arg_datadir}ifconfig_${_arg_ext}.raw"
+			/sbin/ifconfig -a >>"${_arg_datadir}ifconfig_${_arg_ext}.raw"
+		elif ip a >/dev/null 2>&1; then
+			print_debug "Downloading ifconfig"
+			print_header "ip" >"${_arg_datadir}ifconfig_${_arg_ext}.raw"
+			ip a >>"${_arg_datadir}ifconfig_${_arg_ext}.raw"
+		fi
 		print_debug "Downloading SAPHostAgent"
 		print_header "SAPHostAgent" >"${_arg_datadir}saphostagent_${_arg_ext}.raw"
 		"${_arg_dir}saphostctrl" -prot PIPE -function GetCIMObject -enuminstances SAPHostAgent >>"${_arg_datadir}saphostagent_${_arg_ext}.raw"
@@ -482,14 +492,16 @@ if [[ "${_arg_normalize}" == "on" ]]; then
 	fi
 	cd "${_arg_procdir}" && {
 		while IFS= read -r l_rawfile; do
-			_cmd=$(awk 'NR==5 {print tolower($1)}' "${l_rawfile}")
+			_cmd=$(awk 'NR==4 {print tolower($1)}' "${l_rawfile}")
 			l_file="${l_rawfile%.*}"
 			l_logfile="${l_file}.log"
 			if [[ ! -r "${_arg_awk}n${_cmd}.awk" ]]; then
 				_cmd="default"
 			fi
 			print_debug "Transform ${_cmd} ${l_rawfile}"
-			awk "${_arg_awk}n${_cmd}.awk" "${l_rawfile}" >"${l_logfile}"
+			awk -f "${_arg_awk}n${_cmd}.awk" "${l_rawfile}" >"${l_logfile}"
 		done < <(find "${_arg_datadir}" -regex "${_arg_datadir}.*\.raw" 2>/dev/null)
 	}
 fi
+
+

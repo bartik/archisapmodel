@@ -197,12 +197,12 @@ IF NOT EXIST "!_arg_procdir!" (
 CD "!_arg_procdir!" || GOTO :skip_processing
 REM Process log files to model
 awk -vDEBUG=4 -f "!_arg_awk!archi.awk" "%SCRIPTPATH%\archi.cfg" ^
-"!_arg_procdir!getcomputersystem_"*.log ^
-"!_arg_procdir!getdatabasesystem_"*.log ^
-"!_arg_procdir!parametervalue_"*.log ^
-"!_arg_procdir!listsap_"*.log ^
-"!_arg_procdir!getversioninfo_"*.log ^
-"!_arg_procdir!getcomponentlist_"*.log > !_arg_procdir!archi.out
+!_arg_procdir!getcomputersystem_!_arg_ext!.log ^
+!_arg_procdir!getdatabasesystem_*.log ^
+!_arg_procdir!parametervalue_*.log ^
+!_arg_procdir!listsap_*.log ^
+!_arg_procdir!getversioninfo_*.log ^
+!_arg_procdir!getcomponentlist_*.log > !_arg_procdir!archi.out
 REM Generate csv output
 REM Elements
 IF "!_arg_debug!"=="on" ECHO Generating elements
